@@ -17,7 +17,7 @@
 
 ---
 
-**Thrice** is a drop-in improvement suite for the [Hermes Agent](https://github.com/NousResearch/hermes-agent). It adds 38 standalone Python modules covering smarter tool use, better context management, formal state machine hardening, multi-agent coordination, and research-grade features — all with graceful fallbacks. Delete any module file and Hermes instantly reverts to its original behavior.
+**Thrice** is a drop-in improvement suite for [Hermes Agent](https://github.com/NousResearch/hermes-agent). It adds 38 standalone Python modules covering smarter tool use, better context management, formal state machine hardening, multi-agent coordination, and research-grade features — all with graceful fallbacks. Delete any module file and Hermes instantly reverts to its original behavior.
 
 ## Quick Start
 
