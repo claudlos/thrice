@@ -1,0 +1,22 @@
+diff --git a/tools/skills_tool.py b/tools/skills_tool.py
+index 6c9e2441..78d7c19d 100644
+--- a/tools/skills_tool.py
++++ b/tools/skills_tool.py
+@@ -858,6 +858,17 @@ def skill_view(name: str, file_path: str = None, task_id: str = None) -> str:
+                 ensure_ascii=False,
+             )
+ 
++        # Skill verification: validate frontmatter before loading
++        try:
++            from skill_verifier import SkillSchema
++            _skill_errors = SkillSchema.validate_frontmatter(content)
++            if _skill_errors:
++                logger.warning("Skill '%s' validation warnings: %s", name, _skill_errors)
++        except ImportError:
++            pass  # skill_verifier not available
++        except Exception as _sv_exc:
++            logger.debug("Skill verifier failed for '%s': %s", name, _sv_exc)
++
+         # Security: warn if skill is loaded from outside trusted directories
+         # (local skills dir + configured external_dirs are all trusted)
+         _outside_skills_dir = True

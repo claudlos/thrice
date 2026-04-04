@@ -1,0 +1,43 @@
+diff --git a/tools/file_tools.py b/tools/file_tools.py
+index 79a111cb..384e5189 100644
+--- a/tools/file_tools.py
++++ b/tools/file_tools.py
+@@ -567,6 +567,17 @@ def write_file_tool(path: str, content: str, task_id: str = "default") -> str:
+         # Refresh the stored timestamp so consecutive writes by this
+         # task don't trigger false staleness warnings.
+         _update_read_timestamp(path, task_id)
++        # Auto-commit if enabled (gated by HERMES_AUTO_COMMIT env var)
++        try:
++            from auto_commit import is_auto_commit_enabled, AutoCommitManager
++            if is_auto_commit_enabled():
++                _ac = AutoCommitManager()
++                _ac.enable(os.path.dirname(os.path.abspath(path)) or ".")
++                _ac.on_file_edit(path, f"write {os.path.basename(path)}")
++        except ImportError:
++            pass
++        except Exception:
++            pass
+         return json.dumps(result_dict, ensure_ascii=False)
+     except Exception as e:
+         if _is_expected_write_exception(e):
+@@ -623,6 +634,20 @@ def patch_tool(mode: str = "replace", path: str = None, old_string: str = None,
+         if not result_dict.get("error"):
+             for _p in _paths_to_check:
+                 _update_read_timestamp(_p, task_id)
++        # Auto-commit patched files if enabled (gated by HERMES_AUTO_COMMIT env var)
++        if not result_dict.get("error") and _paths_to_check:
++            try:
++                from auto_commit import is_auto_commit_enabled, AutoCommitManager
++                if is_auto_commit_enabled():
++                    _ac = AutoCommitManager()
++                    _first = _paths_to_check[0]
++                    _ac.enable(os.path.dirname(os.path.abspath(_first)) or ".")
++                    for _p in _paths_to_check:
++                        _ac.on_file_edit(_p, f"patch {os.path.basename(_p)}")
++            except ImportError:
++                pass
++            except Exception:
++                pass
+         result_json = json.dumps(result_dict, ensure_ascii=False)
+         # Hint when old_string not found — saves iterations where the agent
+         # retries with stale content instead of re-reading the file.

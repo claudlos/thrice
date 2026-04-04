@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+.hypothesis/
+.pytest_cache/
+*.egg
+.eggs/
+plan.md
+AUDIT.md
+AUDIT-codex.md

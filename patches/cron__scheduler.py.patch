@@ -1,0 +1,121 @@
+diff --git a/cron/scheduler.py b/cron/scheduler.py
+index 6b65eff2..0622aead 100644
+--- a/cron/scheduler.py
++++ b/cron/scheduler.py
+@@ -36,7 +36,15 @@ logger = logging.getLogger(__name__)
+ # Add parent directory to path for imports
+ sys.path.insert(0, str(Path(__file__).parent.parent))
+ 
+-from cron.jobs import get_due_jobs, mark_job_run, save_job_output, advance_next_run
++from cron.jobs import (
++    get_due_jobs,
++    mark_job_run,
++    save_job_output,
++    advance_next_run,
++    update_job,
++    is_valid_transition,
++    _guard_transition,
++)
+ 
+ # Sentinel: when a cron agent has nothing new to report, it can start its
+ # response with this marker to suppress delivery.  Output is still saved
+@@ -514,6 +522,64 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
+                 logger.debug("Job '%s': failed to close SQLite session store: %s", job_id, e)
+ 
+ 
++_STALE_RUNNING_THRESHOLD_SECONDS = 600  # 10 minutes
++
++
++def _recover_stale_running_jobs() -> None:
++    """Detect and recover jobs stuck in 'running' state from a previous crash.
++
++    Only recovers jobs that have been running for longer than
++    _STALE_RUNNING_THRESHOLD_SECONDS (default 10 minutes) to avoid
++    marking legitimately-running jobs as failed.
++    """
++    from cron.jobs import load_jobs, save_jobs
++    import time as _time
++    from datetime import datetime, timezone
++    jobs = load_jobs()
++    recovered = 0
++    now = _time.time()
++    for job in jobs:
++        if job.get("state") == "running":
++            # Check if the job has been running long enough to be considered stale
++            last_run = job.get("last_run_at") or job.get("running_since")
++            if last_run:
++                try:
++                    if isinstance(last_run, str):
++                        # Parse ISO format string
++                        run_dt = datetime.fromisoformat(last_run)
++                        if run_dt.tzinfo is None:
++                            run_dt = run_dt.replace(tzinfo=timezone.utc)
++                    else:
++                        run_dt = last_run
++                    elapsed = now - run_dt.timestamp()
++                except Exception:
++                    elapsed = _STALE_RUNNING_THRESHOLD_SECONDS + 1  # assume stale on parse error
++            else:
++                # No timestamp available — assume stale (legacy job)
++                elapsed = _STALE_RUNNING_THRESHOLD_SECONDS + 1
++
++            if elapsed < _STALE_RUNNING_THRESHOLD_SECONDS:
++                logger.debug(
++                    "Job '%s' (ID: %s) still running for %.0fs — not yet stale",
++                    job.get("name", "?"), job.get("id", "?"), elapsed
++                )
++                continue
++
++            logger.warning(
++                "Recovering stale running job '%s' (ID: %s) — marking as failed (running for %.0fs)",
++                job.get("name", "?"), job.get("id", "?"), elapsed
++            )
++            # Guard: running -> failed is a valid transition
++            _guard_transition(job.get("id", "?"), "running", "failed")
++            job["state"] = "failed"
++            job["last_error"] = "Process crashed during execution (recovered on restart)"
++            job["last_status"] = "error"
++            recovered += 1
++    if recovered:
++        save_jobs(jobs)
++        logger.info("Recovered %d stale running job(s)", recovered)
++
++
+ def tick(verbose: bool = True) -> int:
+     """
+     Check and run all due jobs.
+@@ -544,6 +610,9 @@ def tick(verbose: bool = True) -> int:
+         return 0
+ 
+     try:
++        # Recover any jobs stuck in 'running' from a previous crash
++        _recover_stale_running_jobs()
++
+         due_jobs = get_due_jobs()
+ 
+         if verbose and not due_jobs:
+@@ -562,6 +631,12 @@ def tick(verbose: bool = True) -> int:
+                 # One-shot jobs are left alone so they can retry on restart.
+                 advance_next_run(job["id"])
+ 
++                # Mark the job as running before execution
++                try:
++                    update_job(job["id"], {"state": "running"})
++                except Exception as e:
++                    logger.warning("Failed to set job '%s' to running: %s", job["id"], e)
++
+                 success, output, final_response, error = run_job(job)
+ 
+                 output_file = save_job_output(job["id"], output)
+@@ -589,6 +664,11 @@ def tick(verbose: bool = True) -> int:
+             except Exception as e:
+                 logger.error("Error processing job %s: %s", job['id'], e)
+                 mark_job_run(job["id"], False, str(e))
++                # Ensure the job transitions out of 'running' on failure
++                try:
++                    update_job(job["id"], {"state": "failed"})
++                except Exception:
++                    pass  # mark_job_run may have already transitioned it
+ 
+         return executed
+     finally:

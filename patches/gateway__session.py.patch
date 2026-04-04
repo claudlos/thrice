@@ -1,0 +1,24 @@
+diff --git a/gateway/session.py b/gateway/session.py
+index c3b913ef..2f4c79f2 100644
+--- a/gateway/session.py
++++ b/gateway/session.py
+@@ -487,6 +487,10 @@ class SessionStore:
+         self._loaded = False
+         self._lock = threading.Lock()
+         self._has_active_processes_fn = has_active_processes_fn
++        # on_auto_reset is deprecated — memory flush now runs proactively
++        # via the background session expiry watcher in GatewayRunner.
++        self._pre_flushed_sessions: set = set()  # session_ids already flushed by watcher
++        self._flush_lock = threading.Lock()  # protects _pre_flushed_sessions
+         
+         # Initialize SQLite session database
+         self._db = None
+@@ -695,6 +699,8 @@ class SessionStore:
+                     # Track whether the expired session had any real conversation
+                     reset_had_activity = entry.total_tokens > 0
+                     db_end_session_id = entry.session_id
++                    with self._flush_lock:
++                        self._pre_flushed_sessions.discard(entry.session_id)
+             else:
+                 was_auto_reset = False
+                 auto_reset_reason = None

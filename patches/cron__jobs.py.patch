@@ -1,0 +1,236 @@
+diff --git a/cron/jobs.py b/cron/jobs.py
+index 22c04d0c..5a5163fb 100644
+--- a/cron/jobs.py
++++ b/cron/jobs.py
+@@ -38,6 +38,89 @@ OUTPUT_DIR = CRON_DIR / "output"
+ ONESHOT_GRACE_SECONDS = 120
+ 
+ 
++# =============================================================================
++# Cron Job State Machine
++# =============================================================================
++
++# Valid states for a cron job
++JOB_STATES = frozenset({"scheduled", "running", "paused", "completed", "failed"})
++
++# Valid state transitions: {from_state: {allowed_target_states}}
++VALID_TRANSITIONS = {
++    "scheduled": {"running", "paused"},
++    "running":   {"scheduled", "completed", "failed"},
++    "paused":    {"scheduled"},
++    "completed": set(),  # terminal
++    "failed":    {"scheduled", "paused"},
++}
++
++
++class InvalidTransitionError(ValueError):
++    """Raised when a cron job state transition is not allowed."""
++
++    def __init__(self, job_id: str, current: str, target: str):
++        self.job_id = job_id
++        self.current = current
++        self.target = target
++        allowed = VALID_TRANSITIONS.get(current, set())
++        super().__init__(
++            f"Invalid state transition for job '{job_id}': "
++            f"'{current}' -> '{target}' "
++            f"(allowed from '{current}': {sorted(allowed) if allowed else 'none — terminal state'})"
++        )
++
++
++def is_valid_transition(current: str, target: str) -> bool:
++    """Check if a state transition is valid."""
++    if current not in VALID_TRANSITIONS:
++        return False
++    return target in VALID_TRANSITIONS[current]
++
++
++def _guard_transition(job_id: str, current: str, target: str) -> None:
++    """Guard: raise InvalidTransitionError if the transition is not allowed.
++
++    Called before every state mutation to enforce the cron state machine.
++    No-op if current == target (idempotent writes are always safe).
++    """
++    if current == target:
++        return
++    if not is_valid_transition(current, target):
++        logger.error(
++            "BLOCKED invalid transition for job '%s': '%s' -> '%s'",
++            job_id, current, target,
++        )
++        raise InvalidTransitionError(job_id, current, target)
++
++
++def job_is_active(job: Dict[str, Any]) -> bool:
++    """Check if a job is active (not paused, completed, or failed)."""
++    return job.get("state", "scheduled") not in ("paused", "completed", "failed")
++
++
++def _check_job_invariants(job: Dict[str, Any]) -> None:
++    """Runtime invariant check after any job mutation.
++
++    Uses the centralized InvariantChecker for consistent reporting.
++    Also performs per-job checks that don't need the full job list.
++    """
++    try:
++        from hermes_invariants import InvariantChecker
++        InvariantChecker.check_cron_invariants([job])
++    except ImportError:
++        pass  # invariant module not available
++
++    state = job.get("state", "scheduled")
++
++    # INV-1: State must be valid
++    if state not in JOB_STATES:
++        logger.error("INVARIANT VIOLATION: job '%s' has invalid state '%s'", job.get("id"), state)
++
++    # INV-3: Completed jobs should not have next_run_at
++    if state == "completed" and job.get("next_run_at") is not None:
++        logger.warning("INVARIANT WARNING: completed job '%s' still has next_run_at", job.get("id"))
++
++
+ def _normalize_skill_list(skill: Optional[str] = None, skills: Optional[Any] = None) -> List[str]:
+     """Normalize legacy/single-skill and multi-skill inputs into a unique ordered list."""
+     if skills is None:
+@@ -326,7 +409,19 @@ def load_jobs() -> List[Dict[str, Any]]:
+     try:
+         with open(JOBS_FILE, 'r', encoding='utf-8') as f:
+             data = json.load(f)
+-            return data.get("jobs", [])
++            jobs = data.get("jobs", [])
++            # Migration: old jobs with enabled=false but no state field
++            # would default to "scheduled" and become active after upgrade.
++            # Convert them to "paused" state.
++            migrated = False
++            for job in jobs:
++                if job.get("enabled") is False and job.get("state", "scheduled") in ("scheduled", None):
++                    job["state"] = "paused"
++                    migrated = True
++            if migrated:
++                save_jobs(jobs)
++                logger.info("Migrated old enabled=false jobs to state='paused'")
++            return jobs
+     except json.JSONDecodeError:
+         # Retry with strict=False to handle bare control chars in string values
+         try:
+@@ -436,8 +531,8 @@ def create_job(
+             "times": repeat,  # None = forever
+             "completed": 0
+         },
+-        "enabled": True,
+         "state": "scheduled",
++        "enabled": True,          # derived from state for backward compat
+         "paused_at": None,
+         "paused_reason": None,
+         "created_at": now,
+@@ -451,6 +546,7 @@ def create_job(
+     }
+ 
+     jobs = load_jobs()
++    _check_job_invariants(job)
+     jobs.append(job)
+     save_jobs(jobs)
+ 
+@@ -470,18 +566,39 @@ def list_jobs(include_disabled: bool = False) -> List[Dict[str, Any]]:
+     """List all jobs, optionally including disabled ones."""
+     jobs = [_apply_skill_fields(j) for j in load_jobs()]
+     if not include_disabled:
+-        jobs = [j for j in jobs if j.get("enabled", True)]
++        jobs = [j for j in jobs if job_is_active(j)]
+     return jobs
+ 
+ 
+ def update_job(job_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+-    """Update a job by ID, refreshing derived schedule fields when needed."""
++    """Update a job by ID, refreshing derived schedule fields when needed.
++
++    If ``updates`` contains a ``state`` key the transition is validated
++    against VALID_TRANSITIONS before the write.  An InvalidTransitionError
++    is raised for illegal transitions so callers get a clear signal.
++    """
+     jobs = load_jobs()
+     for i, job in enumerate(jobs):
+         if job["id"] != job_id:
+             continue
+ 
++        # --- Map enabled=True/False to state for backward compat ---
++        if "enabled" in updates and "state" not in updates:
++            if not updates["enabled"]:
++                updates["state"] = "paused"
++            elif job.get("state") == "paused":
++                updates["state"] = "scheduled"
++
++        # --- Guard: validate state transition before any mutation ---
++        if "state" in updates:
++            current_state = job.get("state", "scheduled")
++            target_state = updates["state"]
++            _guard_transition(job_id, current_state, target_state)
++
+         updated = _apply_skill_fields({**job, **updates})
++        # Keep 'enabled' in sync with state for backward compatibility
++        if "state" in updates:
++            updated["enabled"] = job_is_active(updated)
+         schedule_changed = "schedule" in updates
+ 
+         if "skills" in updates or "skill" in updates:
+@@ -498,7 +615,7 @@ def update_job(job_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]
+             if updated.get("state") != "paused":
+                 updated["next_run_at"] = compute_next_run(updated_schedule)
+ 
+-        if updated.get("enabled", True) and updated.get("state") != "paused" and not updated.get("next_run_at"):
++        if updated.get("state") not in ("paused", "completed", "failed") and not updated.get("next_run_at"):
+             updated["next_run_at"] = compute_next_run(updated["schedule"])
+ 
+         jobs[i] = updated
+@@ -512,8 +629,8 @@ def pause_job(job_id: str, reason: Optional[str] = None) -> Optional[Dict[str, A
+     return update_job(
+         job_id,
+         {
+-            "enabled": False,
+             "state": "paused",
++            "enabled": False,
+             "paused_at": _hermes_now().isoformat(),
+             "paused_reason": reason,
+         },
+@@ -530,8 +647,8 @@ def resume_job(job_id: str) -> Optional[Dict[str, Any]]:
+     return update_job(
+         job_id,
+         {
+-            "enabled": True,
+             "state": "scheduled",
++            "enabled": True,
+             "paused_at": None,
+             "paused_reason": None,
+             "next_run_at": next_run_at,
+@@ -547,7 +664,6 @@ def trigger_job(job_id: str) -> Optional[Dict[str, Any]]:
+     return update_job(
+         job_id,
+         {
+-            "enabled": True,
+             "state": "scheduled",
+             "paused_at": None,
+             "paused_reason": None,
+@@ -598,11 +714,12 @@ def mark_job_run(job_id: str, success: bool, error: Optional[str] = None):
+             # Compute next run
+             job["next_run_at"] = compute_next_run(job["schedule"], now)
+ 
+-            # If no next run (one-shot completed), disable
++            # If no next run (one-shot completed), mark completed
+             if job["next_run_at"] is None:
+-                job["enabled"] = False
++                _guard_transition(job["id"], job.get("state", "scheduled"), "completed")
+                 job["state"] = "completed"
+             elif job.get("state") != "paused":
++                _guard_transition(job["id"], job.get("state", "scheduled"), "scheduled")
+                 job["state"] = "scheduled"
+ 
+             save_jobs(jobs)
+@@ -654,7 +771,7 @@ def get_due_jobs() -> List[Dict[str, Any]]:
+     needs_save = False
+ 
+     for job in jobs:
+-        if not job.get("enabled", True):
++        if job.get("state") in ("paused", "completed", "failed", "running") or not job.get("enabled", True):
+             continue
+ 
+         next_run = job.get("next_run_at")

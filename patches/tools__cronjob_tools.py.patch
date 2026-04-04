@@ -1,0 +1,46 @@
+diff --git a/tools/cronjob_tools.py b/tools/cronjob_tools.py
+index 84054c6e..05d5f128 100644
+--- a/tools/cronjob_tools.py
++++ b/tools/cronjob_tools.py
+@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
+ from cron.jobs import (
+     create_job,
+     get_job,
++    InvalidTransitionError,
+     list_jobs,
+     parse_schedule,
+     pause_job,
+@@ -131,8 +132,8 @@ def _format_job(job: Dict[str, Any]) -> Dict[str, Any]:
+         "next_run_at": job.get("next_run_at"),
+         "last_run_at": job.get("last_run_at"),
+         "last_status": job.get("last_status"),
+-        "enabled": job.get("enabled", True),
+-        "state": job.get("state", "scheduled" if job.get("enabled", True) else "paused"),
++        "enabled": job.get("state", "scheduled") not in ("paused", "completed", "failed"),
++        "state": job.get("state", "scheduled"),
+         "paused_at": job.get("paused_at"),
+         "paused_reason": job.get("paused_reason"),
+     }
+@@ -277,7 +278,6 @@ def cronjob(
+                 updates["schedule_display"] = parsed_schedule.get("display", schedule)
+                 if job.get("state") != "paused":
+                     updates["state"] = "scheduled"
+-                    updates["enabled"] = True
+             if not updates:
+                 return json.dumps({"success": False, "error": "No updates provided."}, indent=2)
+             updated = update_job(job_id, updates)
+@@ -285,6 +285,14 @@ def cronjob(
+ 
+         return json.dumps({"success": False, "error": f"Unknown cron action '{action}'"}, indent=2)
+ 
++    except InvalidTransitionError as e:
++        return json.dumps({
++            "success": False,
++            "error": str(e),
++            "error_type": "invalid_transition",
++            "current_state": e.current,
++            "target_state": e.target,
++        }, indent=2)
+     except Exception as e:
+         return json.dumps({"success": False, "error": str(e)}, indent=2)
+ 

@@ -1,0 +1,17 @@
+diff --git a/agent/prompt_builder.py b/agent/prompt_builder.py
+index 0a8606c4..95295685 100644
+--- a/agent/prompt_builder.py
++++ b/agent/prompt_builder.py
+@@ -315,6 +315,12 @@ def clear_skills_system_prompt_cache(*, clear_snapshot: bool = False) -> None:
+             _skills_prompt_snapshot_path().unlink(missing_ok=True)
+         except OSError as e:
+             logger.debug("Could not remove skills prompt snapshot: %s", e)
++    # Also bust the TTL-based skill index cache (#3)
++    try:
++        from agent.skill_index_cache import get_default_cache
++        get_default_cache().invalidate()
++    except ImportError:
++        pass
+ 
+ 
+ def _build_skills_manifest(skills_dir: Path) -> dict[str, list[int]]:

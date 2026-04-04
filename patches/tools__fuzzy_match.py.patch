@@ -1,0 +1,44 @@
+diff --git a/tools/fuzzy_match.py b/tools/fuzzy_match.py
+index 9f14ba35..175e7954 100644
+--- a/tools/fuzzy_match.py
++++ b/tools/fuzzy_match.py
+@@ -78,6 +78,7 @@ def fuzzy_find_and_replace(content: str, old_string: str, new_string: str,
+         ("escape_normalized", _strategy_escape_normalized),
+         ("trimmed_boundary", _strategy_trimmed_boundary),
+         ("block_anchor", _strategy_block_anchor),
++        ("comment_stripped", _strategy_comment_stripped),
+         ("context_aware", _strategy_context_aware),
+     ]
+     
+@@ -312,6 +313,31 @@ def _strategy_block_anchor(content: str, pattern: str) -> List[Tuple[int, int]]:
+     return matches
+ 
+ 
++def _strategy_comment_stripped(content: str, pattern: str) -> List[Tuple[int, int]]:
++    """
++    Strategy 9: Match with comments stripped from both sides.
++
++    Uses comment_strip_matcher to remove comments before comparing,
++    then maps back to original positions. Handles cases where model
++    remembers code without comments or with different comments.
++    """
++    try:
++        from comment_strip_matcher import match_ignoring_comments
++    except ImportError:
++        return []
++
++    result = match_ignoring_comments(pattern, content)
++    if result is None:
++        return []
++
++    start_line, end_line = result
++    content_lines = content.split('\n')
++    start_pos, end_pos = _calculate_line_positions(
++        content_lines, start_line, end_line + 1, len(content)
++    )
++    return [(start_pos, end_pos)]
++
++
+ def _strategy_context_aware(content: str, pattern: str) -> List[Tuple[int, int]]:
+     """
+     Strategy 8: Line-by-line similarity with 50% threshold.

@@ -1,0 +1,449 @@
+diff --git a/run_agent.py b/run_agent.py
+index 85d9302c..56476386 100644
+--- a/run_agent.py
++++ b/run_agent.py
+@@ -2545,6 +2545,25 @@ class AIAgent:
+             if context_files_prompt:
+                 prompt_parts.append(context_files_prompt)
+ 
++        # Repository map (#6): lightweight codebase structure for LLM context
++        try:
++            from repo_map import get_repo_map
++            _repo_map_dir = os.getenv("TERMINAL_CWD") or os.getcwd()
++            # Only generate for projects with < 1000 files, max 2000 tokens
++            _file_count = sum(1 for _ in os.scandir(_repo_map_dir) if True) if os.path.isdir(_repo_map_dir) else 0
++            if _file_count < 1000:
++                _repo_map_text = get_repo_map(_repo_map_dir, max_tokens=2000)
++                if _repo_map_text:
++                    prompt_parts.append(
++                        "## Repository Structure\n"
++                        "Key symbols in this codebase (ranked by importance):\n"
++                        f"{_repo_map_text}\n"
++                    )
++        except ImportError:
++            pass
++        except Exception as _rm_err:
++            logger.debug("Repo map generation failed: %s", _rm_err)
++
+         from hermes_time import now as _hermes_now
+         now = _hermes_now()
+         timestamp_line = f"Conversation started: {now.strftime('%A, %B %d, %Y %I:%M %p')}"
+@@ -2572,7 +2591,25 @@ class AIAgent:
+         if platform_key in PLATFORM_HINTS:
+             prompt_parts.append(PLATFORM_HINTS[platform_key])
+ 
+-        return "\n\n".join(prompt_parts)
++        final_prompt = "\n\n".join(prompt_parts)
++
++        # (#12) Prompt algebra verification: log warnings if the assembled
++        # system prompt exceeds a reasonable token budget.
++        try:
++            from prompt_algebra import PromptVerifier, PromptSegment, Priority, estimate_tokens as _pa_est
++            _prompt_tokens = _pa_est(final_prompt)
++            _budget = self.context_compressor.context_length // 3 if hasattr(self, "context_compressor") else 30000
++            if _prompt_tokens > _budget:
++                logger.warning(
++                    "Prompt algebra: system prompt (%d tokens) exceeds 1/3 context budget (%d tokens)",
++                    _prompt_tokens, _budget,
++                )
++        except ImportError:
++            pass
++        except Exception as _pa_err:
++            logger.debug("Prompt algebra verification failed (non-fatal): %s", _pa_err)
++
++        return final_prompt
+ 
+     # =========================================================================
+     # Pre/post-call guardrails (inspired by PR #1321 — @alireza78a)
+@@ -2699,6 +2736,28 @@ class AIAgent:
+ 
+         Returns the repaired name if found in valid_tool_names, else None.
+         """
++        # 0. Instant alias resolution (common hallucinations like bash->terminal)
++        from tool_alias_map import resolve_alias
++        resolved = resolve_alias(tool_name)
++        if resolved and resolved in self.valid_tool_names:
++            return resolved
++
++        # 0b. ML-based tool suggestion (trained on past usage patterns)
++        try:
++            from tool_selection_model import ToolSelector, ToolSelectionModel, ToolSelectionLogger
++            _db_path = os.path.join(get_hermes_home(), "tool_calls.db")
++            _tsl = ToolSelectionLogger(_db_path)
++            _tsm = ToolSelectionModel(_tsl)
++            _tsm.train()
++            _selector = ToolSelector(_tsm)
++            ml_suggestion = _selector.suggest_tool(tool_name, list(self.valid_tool_names))
++            if ml_suggestion:
++                return ml_suggestion
++        except ImportError:
++            pass
++        except Exception as _ml_err:
++            logger.debug("Tool selection model failed (non-fatal): %s", _ml_err)
++
+         from difflib import get_close_matches
+ 
+         # 1. Lowercase
+@@ -5480,6 +5539,18 @@ class AIAgent:
+             except Exception:
+                 pass
+ 
++        # (#11) Context optimization pass: score messages by importance and
++        # drop the lowest-scored ones BEFORE the LLM summarization pass.
++        try:
++            from context_optimizer import ContextOptimizer
++            _target = approx_tokens or self.context_compressor.threshold_tokens
++            optimizer = ContextOptimizer()
++            messages = optimizer.optimize(messages, target_tokens=_target, model=self.model)
++        except ImportError:
++            pass
++        except Exception as _opt_err:
++            logger.debug("Context optimizer pre-pass failed (non-fatal): %s", _opt_err)
++
+         compressed = self.context_compressor.compress(messages, current_tokens=approx_tokens)
+ 
+         todo_snapshot = self._todo_store.format_for_injection()
+@@ -5742,7 +5813,9 @@ class AIAgent:
+             try:
+                 result = self._invoke_tool(function_name, function_args, effective_task_id)
+             except Exception as tool_error:
+-                result = f"Error executing tool '{function_name}': {tool_error}"
++                from structured_errors import classify_error, format_error_result
++                structured = classify_error(tool_error, tool_name=function_name)
++                result = format_error_result(structured)
+                 logger.error("_invoke_tool raised for %s: %s", function_name, tool_error, exc_info=True)
+             duration = time.time() - start
+             is_error, _ = _detect_tool_failure(function_name, result)
+@@ -5808,15 +5881,23 @@ class AIAgent:
+                 except Exception as cb_err:
+                     logging.debug(f"Tool complete callback error: {cb_err}")
+ 
+-            # Truncate oversized results
++            # Truncate oversized results (smart: keep head + tail + stderr)
+             MAX_TOOL_RESULT_CHARS = 100_000
+             if len(function_result) > MAX_TOOL_RESULT_CHARS:
+                 original_len = len(function_result)
+-                function_result = (
+-                    function_result[:MAX_TOOL_RESULT_CHARS]
+-                    + f"\n\n[Truncated: tool response was {original_len:,} chars, "
+-                    f"exceeding the {MAX_TOOL_RESULT_CHARS:,} char limit]"
+-                )
++                try:
++                    from smart_truncation import truncate_output
++                    function_result = truncate_output(
++                        function_result, max_chars=MAX_TOOL_RESULT_CHARS
++                    )
++                except ImportError:
++                    function_result = function_result[:MAX_TOOL_RESULT_CHARS]
++                # Ensure a recognisable truncation marker is always present
++                if "Truncated" not in function_result:
++                    function_result += (
++                        f"\n\n[Truncated: tool response was {original_len:,} chars, "
++                        f"exceeding the {MAX_TOOL_RESULT_CHARS:,} char limit]"
++                    )
+ 
+             # Append tool result message in order
+             tool_msg = {
+@@ -6025,7 +6106,9 @@ class AIAgent:
+                     )
+                     _spinner_result = function_result
+                 except Exception as tool_error:
+-                    function_result = f"Error executing tool '{function_name}': {tool_error}"
++                    from structured_errors import classify_error, format_error_result
++                    structured = classify_error(tool_error, tool_name=function_name)
++                    function_result = format_error_result(structured)
+                     logger.error("handle_function_call raised for %s: %s", function_name, tool_error, exc_info=True)
+                 finally:
+                     tool_duration = time.time() - tool_start_time
+@@ -6041,7 +6124,9 @@ class AIAgent:
+                         enabled_tools=list(self.valid_tool_names) if self.valid_tool_names else None,
+                     )
+                 except Exception as tool_error:
+-                    function_result = f"Error executing tool '{function_name}': {tool_error}"
++                    from structured_errors import classify_error, format_error_result
++                    structured = classify_error(tool_error, tool_name=function_name)
++                    function_result = format_error_result(structured)
+                     logger.error("handle_function_call raised for %s: %s", function_name, tool_error, exc_info=True)
+                 tool_duration = time.time() - tool_start_time
+ 
+@@ -6072,11 +6157,19 @@ class AIAgent:
+             MAX_TOOL_RESULT_CHARS = 100_000
+             if len(function_result) > MAX_TOOL_RESULT_CHARS:
+                 original_len = len(function_result)
+-                function_result = (
+-                    function_result[:MAX_TOOL_RESULT_CHARS]
+-                    + f"\n\n[Truncated: tool response was {original_len:,} chars, "
+-                    f"exceeding the {MAX_TOOL_RESULT_CHARS:,} char limit]"
+-                )
++                try:
++                    from smart_truncation import truncate_output
++                    function_result = truncate_output(
++                        function_result, max_chars=MAX_TOOL_RESULT_CHARS
++                    )
++                except ImportError:
++                    function_result = function_result[:MAX_TOOL_RESULT_CHARS]
++                # Ensure a recognisable truncation marker is always present
++                if "Truncated" not in function_result:
++                    function_result += (
++                        f"\n\n[Truncated: tool response was {original_len:,} chars, "
++                        f"exceeding the {MAX_TOOL_RESULT_CHARS:,} char limit]"
++                    )
+ 
+             tool_msg = {
+                 "role": "tool",
+@@ -6085,6 +6178,24 @@ class AIAgent:
+             }
+             messages.append(tool_msg)
+ 
++            # Log tool call for ML-based tool selection model (#10)
++            try:
++                from tool_selection_model import ToolSelectionLogger
++                _db_path = os.path.join(get_hermes_home(), "tool_calls.db")
++                _tsl = ToolSelectionLogger(_db_path)
++                _is_err, _ = _detect_tool_failure(function_name, function_result)
++                _tsl.log_tool_call(
++                    intent=user_message[:500] if user_message else "",
++                    tool_name=function_name,
++                    args=function_args,
++                    success=not _is_err,
++                    duration=tool_duration,
++                )
++            except ImportError:
++                pass
++            except Exception:
++                pass
++
+             if not self.quiet_mode:
+                 if self.verbose_logging:
+                     print(f"  ✅ Tool {i} completed in {tool_duration:.2f}s")
+@@ -6424,7 +6535,22 @@ class AIAgent:
+         # They are initialized in __init__ and must persist across run_conversation
+         # calls so that nudge logic accumulates correctly in CLI mode.
+         self.iteration_budget = IterationBudget(self.max_iterations)
+-        
++
++        # Token budget prediction: suggest iteration budget based on task complexity
++        if os.environ.get("HERMES_PREDICT_BUDGET", "").lower() == "true":
++            try:
++                from token_budgeting import BudgetAdvisor
++                _advisor = BudgetAdvisor()
++                _advice = _advisor.suggest_budget(task=user_message, model=self.model)
++                if getattr(_advice, 'recommended_iterations', None) and self.max_iterations == 90:
++                    self.max_iterations = _advice.recommended_iterations
++                    self.iteration_budget = IterationBudget(self.max_iterations)
++                    logger.debug("Token budget advisor set max_iterations=%d", self.max_iterations)
++            except ImportError:
++                pass  # token_budgeting not available
++            except Exception as _tb_exc:
++                logger.debug("Token budget prediction failed: %s", _tb_exc)
++
+         # Initialize conversation (copy to avoid mutating the caller's list)
+         messages = list(conversation_history) if conversation_history else []
+ 
+@@ -6465,8 +6591,48 @@ class AIAgent:
+                 _should_review_memory = True
+                 self._turns_since_memory = 0
+ 
++        # Honcho prefetch consumption:
++        # - First turn: bake into cached system prompt (stable for the session).
++        # - Later turns: attach recall to the current-turn user message at
++        #   API-call time only (never persisted to history / session DB).
++        #
++        # This keeps the system-prefix cache stable while still allowing turn N
++        # to consume background prefetch results from turn N-1.
++        self._honcho_context = ""
++        self._honcho_turn_context = ""
++        _honcho_cfg = getattr(self, '_honcho_config', None)
++        _recall_mode = (_honcho_cfg.recall_mode if _honcho_cfg else "hybrid")
++        if getattr(self, '_honcho', None) and getattr(self, '_honcho_session_key', None) and _recall_mode != "tools":
++            try:
++                prefetched_context = self._honcho_prefetch(original_user_message)
++                if prefetched_context:
++                    if not conversation_history:
++                        self._honcho_context = prefetched_context
++                    else:
++                        self._honcho_turn_context = prefetched_context
++            except Exception as e:
++                logger.debug("Honcho prefetch failed (non-fatal): %s", e)
++
++        # ── @-mention context resolution ──
++        # Process @-mentions (e.g. @diff, @tree, @file:path) in the user
++        # message and inject resolved context as an extra system-note block.
++        _mention_context = None
++        try:
++            from context_mentions import process_message_mentions
++            _, _mention_context = process_message_mentions(user_message)
++        except ImportError:
++            pass
++        except Exception as _mention_err:
++            logger.debug("@-mention resolution failed (non-fatal): %s", _mention_err)
++
+         # Add user message
+-        user_msg = {"role": "user", "content": user_message}
++        if _mention_context:
++            # Append resolved @-mention context after the user text so the
++            # model sees it in the same turn without altering the original.
++            _enriched = user_message + "\n\n" + _mention_context
++            user_msg = {"role": "user", "content": _enriched}
++        else:
++            user_msg = {"role": "user", "content": user_message}
+         messages.append(user_msg)
+         current_turn_user_idx = len(messages) - 1
+         self._persist_user_message_idx = current_turn_user_idx
+@@ -6620,6 +6786,28 @@ class AIAgent:
+         length_continue_retries = 0
+         truncated_response_prefix = ""
+         compression_attempts = 0
++        # Shadow state machine (#5, Phase 1: passive observer)
++        # Gated behind HERMES_SM_SHADOW=true env var (disabled by default)
++        try:
++            from agent_loop_shadow import AgentLoopShadow
++            _shadow = AgentLoopShadow(
++                iteration_budget=self.max_iterations,
++                max_retries=3,
++                enabled=os.getenv("HERMES_SM_SHADOW", "false").lower() in ("1", "true"),
++            )
++            _shadow.mirror_flag_change("messages_received", True, messages=messages)
++        except ImportError:
++            _shadow = None
++
++        # (#13) Tool chain analysis: loop detection and tool sequence logging
++        _tc_loop_detector = None
++        _tc_recent_tools: list = []
++        _tc_recent_errors: list = []
++        try:
++            from tool_chain_analysis import LoopDetector
++            _tc_loop_detector = LoopDetector()
++        except ImportError:
++            pass
+         
+         # Clear any stale interrupt state at start
+         self.clear_interrupt()
+@@ -6652,6 +6840,19 @@ class AIAgent:
+                     self._safe_print(f"\n⚠️  Iteration budget exhausted ({self.iteration_budget.used}/{self.iteration_budget.max_total} iterations used)")
+                 break
+ 
++            # (#13) Loop detection: if stuck, inject escape suggestion
++            if _tc_loop_detector and _tc_recent_tools:
++                try:
++                    if _tc_loop_detector.is_stuck(_tc_recent_tools, _tc_recent_errors):
++                        _escape_hint = _tc_loop_detector.suggest_escape(_tc_recent_tools)
++                        messages.append({
++                            "role": "user",
++                            "content": f"[SYSTEM NOTICE — loop detected] {_escape_hint}"
++                        })
++                        logger.info("Tool chain loop detected, injected escape suggestion")
++                except Exception as _ld_err:
++                    logger.debug("Loop detection check failed (non-fatal): %s", _ld_err)
++
+             # Fire step_callback for gateway hooks (agent:step event)
+             if self.step_callback is not None:
+                 try:
+@@ -6721,6 +6922,14 @@ class AIAgent:
+             effective_system = active_system_prompt or ""
+             if self.ephemeral_system_prompt:
+                 effective_system = (effective_system + "\n\n" + self.ephemeral_system_prompt).strip()
++            # Debugging guidance (#4): inject context-aware debugging prompts
++            # when errors are detected in recent messages.
++            try:
++                from debugging_guidance import should_inject_debugging_guidance, get_debugging_prompt
++                if should_inject_debugging_guidance(messages):
++                    effective_system = (effective_system + "\n\n" + get_debugging_prompt(messages)).strip()
++            except ImportError:
++                pass
+             # Plugin context from pre_llm_call hooks — ephemeral, not cached.
+             if _plugin_turn_context:
+                 effective_system = (effective_system + "\n\n" + _plugin_turn_context).strip()
+@@ -6741,6 +6950,20 @@ class AIAgent:
+             if self._use_prompt_caching:
+                 api_messages = apply_anthropic_cache_control(api_messages, cache_ttl=self._cache_ttl, native_anthropic=(self.api_mode == 'anthropic_messages'))
+ 
++            # (#14) Verified messages: validate and auto-fix message sequence
++            # before sending to the API. Catches invalid role ordering,
++            # orphaned tool results, and missing tool_call_ids.
++            try:
++                from verified_messages import MessageValidator, AutoFixer
++                _vm_result = MessageValidator().validate(api_messages)
++                if not _vm_result.valid:
++                    logger.info("Verified messages: %d error(s) detected, applying auto-fix", len(_vm_result.errors))
++                    api_messages = AutoFixer().fix(api_messages)
++            except ImportError:
++                pass
++            except Exception as _vm_err:
++                logger.debug("Verified messages validation failed (non-fatal): %s", _vm_err)
++
+             # Safety net: strip orphaned tool results / add stubs for missing
+             # results before sending to the API.  Runs unconditionally — not
+             # gated on context_compressor — so orphans from session loading or
+@@ -6797,6 +7020,7 @@ class AIAgent:
+             while retry_count < max_retries:
+                 try:
+                     api_kwargs = self._build_api_kwargs(api_messages)
++                    if _shadow: _shadow.mirror_flag_change("api_call_started", True, api_params={"messages": api_messages})
+                     if self.api_mode == "codex_responses":
+                         api_kwargs = self._preflight_codex_api_kwargs(api_kwargs, allow_stream=False)
+ 
+@@ -7226,6 +7450,7 @@ class AIAgent:
+                                 self._vprint(f"{self.log_prefix}   💾 Cache: {cached:,}/{prompt:,} tokens ({hit_pct:.0f}% hit, {written:,} written)")
+                     
+                     has_retried_429 = False  # Reset on success
++                    if _shadow: _shadow.mirror_flag_change("response_received", True, response={}, finish_reason=getattr(response, 'finish_reason', 'stop') if response else 'stop')
+                     break  # Success, exit retry loop
+ 
+                 except InterruptedError:
+@@ -8086,6 +8311,19 @@ class AIAgent:
+ 
+                     self._execute_tool_calls(assistant_message, messages, effective_task_id, api_call_count)
+ 
++                    # (#13) Track tool names for loop detection
++                    if _tc_loop_detector is not None:
++                        for _tc in assistant_message.tool_calls:
++                            _tc_recent_tools.append(_tc.function.name)
++                            # Track errors from tool results
++                            for _m in reversed(messages):
++                                if _m.get("role") == "tool" and _m.get("tool_call_id") == _tc.id:
++                                    _content = _m.get("content", "")
++                                    _tc_recent_errors.append(
++                                        _content if ("error" in _content.lower() or "traceback" in _content.lower()) else ""
++                                    )
++                                    break
++
+                     # Signal that a paragraph break is needed before the next
+                     # streamed text.  We don't emit it immediately because
+                     # multiple consecutive tool iterations would stack up
+@@ -8418,6 +8656,18 @@ class AIAgent:
+                 print(f"\n⚠️  Iteration budget exhausted ({self.iteration_budget.used}/{self.iteration_budget.max_total} iterations used)")
+             final_response = self._handle_max_iterations(messages, api_call_count)
+         
++        # Shadow SM end-of-loop summary (#5)
++        if _shadow:
++            try:
++                _shadow.mirror_flag_change("return_result", True)
++                _ss = _shadow.summary()
++                if _ss.get("divergences", 0) > 0 or _ss.get("invariant_violations", 0) > 0:
++                    logger.warning("Shadow SM session summary: %s", _ss)
++                else:
++                    logger.debug("Shadow SM session summary: %s", _ss)
++            except Exception:
++                pass
++
+         # Determine if conversation completed successfully
+         completed = final_response is not None and api_call_count < self.max_iterations
+ 
+@@ -8546,6 +8796,16 @@ class AIAgent:
+         except Exception as exc:
+             logger.warning("on_session_end hook failed: %s", exc)
+ 
++        # Self-improving tests: fire-and-forget session analysis (gated)
++        if os.environ.get("HERMES_SELF_TEST", "").lower() == "true":
++            try:
++                from self_improving_tests import on_session_complete
++                on_session_complete(messages)
++            except ImportError:
++                pass
++            except Exception as _sit_exc:
++                logger.debug("Self-improving test hook failed: %s", _sit_exc)
++
+         return result
+ 
+     def chat(self, message: str, stream_callback: Optional[callable] = None) -> str:

@@ -1,0 +1,26 @@
+diff --git a/cron/__init__.py b/cron/__init__.py
+index 2c44cabf..bdf3d56f 100644
+--- a/cron/__init__.py
++++ b/cron/__init__.py
+@@ -25,6 +25,11 @@ from cron.jobs import (
+     resume_job,
+     trigger_job,
+     JOBS_FILE,
++    is_valid_transition,
++    InvalidTransitionError,
++    JOB_STATES,
++    job_is_active,
++    _guard_transition,
+ )
+ from cron.scheduler import tick
+ 
+@@ -39,4 +44,9 @@ __all__ = [
+     "trigger_job",
+     "tick",
+     "JOBS_FILE",
++    "is_valid_transition",
++    "InvalidTransitionError",
++    "JOB_STATES",
++    "job_is_active",
++    "_guard_transition",
+ ]

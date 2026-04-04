@@ -1,0 +1,19 @@
+diff --git a/tests/tools/test_delegate.py b/tests/tools/test_delegate.py
+index d86a8c48..ea6ad319 100644
+--- a/tests/tools/test_delegate.py
++++ b/tests/tools/test_delegate.py
+@@ -151,9 +151,11 @@ class TestDelegateTask(unittest.TestCase):
+         ]
+         result = json.loads(delegate_task(tasks=tasks, parent_agent=parent))
+         self.assertIn("results", result)
+-        self.assertEqual(len(result["results"]), 2)
+-        self.assertEqual(result["results"][0]["summary"], "Result A")
+-        self.assertEqual(result["results"][1]["summary"], "Result B")
++        # Results include 2 task results + optional consensus_summary
++        task_results = [r for r in result["results"] if "task_index" in r]
++        self.assertEqual(len(task_results), 2)
++        self.assertEqual(task_results[0]["summary"], "Result A")
++        self.assertEqual(task_results[1]["summary"], "Result B")
+         self.assertIn("total_duration_seconds", result)
+ 
+     @patch("tools.delegate_tool._run_single_child")
