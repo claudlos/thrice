@@ -5,7 +5,7 @@
 <h1 align="center">Thrice</h1>
 
 <p align="center">
-  <em>"Thrice Great"</em> — making <a href="https://github.com/livetheoogway/hermes">Hermes</a> even greater than it already is.
+  <em>"Thrice Great"</em> — <a href="https://github.com/NousResearch/hermes-agent">Hermes</a> 
 </p>
 
 <p align="center">
