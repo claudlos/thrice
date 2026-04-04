@@ -162,4 +162,4 @@ Thrice follows three principles:
 
 ## License
 
-Same license as [Hermes Agent](https://github.com/livetheoogway/hermes).
+Same license as [Hermes Agent](https://github.com/NousResearch/hermes-agent)
