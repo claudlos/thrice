@@ -39,10 +39,20 @@ warning: unused variable: `y`
   --> src/main.rs:2:9
 """
 
+# What ``cargo build --message-format=short`` actually emits.  This is the
+# command ``default_command("rust")`` runs, so the parser must ingest it
+# as its primary input format.
+RUST_OUTPUT_SHORT = """\
+src/lib.rs:10:5: error[E0308]: mismatched types
+src/main.rs:2:9: warning: unused variable: `y`
+"""
+
 
 class TestRustParser:
-    def test_parses_error_with_code(self):
-        errs = parse_rust(RUST_OUTPUT)
+    def test_parses_short_error_with_code(self):
+        """Short-form is the primary fixture: that's what the configured
+        cargo command actually produces."""
+        errs = parse_rust(RUST_OUTPUT_SHORT)
         assert any(
             e.file == "src/lib.rs"
             and e.line == 10
@@ -52,10 +62,29 @@ class TestRustParser:
             for e in errs
         )
 
-    def test_parses_warning(self):
-        errs = parse_rust(RUST_OUTPUT)
+    def test_parses_short_warning(self):
+        errs = parse_rust(RUST_OUTPUT_SHORT)
         warnings = [e for e in errs if e.severity == "warning"]
         assert warnings and warnings[0].file == "src/main.rs"
+
+    def test_parses_multiline_fallback(self):
+        """Default rustc output still parses (override-friendly)."""
+        errs = parse_rust(RUST_OUTPUT)
+        assert any(
+            e.file == "src/lib.rs" and e.line == 10 and e.code == "E0308"
+            for e in errs
+        )
+
+    def test_deduplicates_when_both_formats_present(self):
+        """If an override emits both forms for the same diagnostic, the
+        parser must produce a single record, not two."""
+        mixed = RUST_OUTPUT_SHORT + "\n" + RUST_OUTPUT
+        errs = parse_rust(mixed)
+        same = [
+            e for e in errs
+            if e.file == "src/lib.rs" and e.line == 10 and e.severity == "error"
+        ]
+        assert len(same) == 1
 
     def test_empty_output(self):
         assert parse_rust("") == []

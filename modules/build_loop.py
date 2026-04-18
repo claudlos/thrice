@@ -156,7 +156,27 @@ def default_command(toolchain: Toolchain) -> Optional[List[str]]:
 # Each parser returns a list of BuildError; accepts the full stdout+stderr
 # string produced by the tool.  Parsers must be pure and deterministic.
 
-_RUST_RE = re.compile(
+# Short format: ``path:line:col: severity[code]: message``  (one-line).
+# This is what ``cargo build --message-format=short`` emits, and what the
+# default command in ``default_command()`` requests.
+_RUST_RE_SHORT = re.compile(
+    r"""^
+    (?P<file>[^\s:][^:\n]*?)
+    :(?P<line>\d+):(?P<col>\d+)
+    :\s*
+    (?P<severity>error|warning|note)
+    (?:\[(?P<code>[A-Z]\d+)\])?
+    :\s*(?P<message>.+)$
+    """,
+    re.VERBOSE | re.MULTILINE,
+)
+
+# Multiline (default) format:
+#     error[E0308]: mismatched types
+#       --> src/lib.rs:10:5
+# Kept as a fallback so callers who override the command still get parsed
+# diagnostics.
+_RUST_RE_MULTILINE = re.compile(
     r"""^
     (?P<severity>error|warning|note)
     (?:\[(?P<code>[A-Z]\d+)\])?
@@ -168,9 +188,29 @@ _RUST_RE = re.compile(
 
 
 def parse_rust(output: str) -> List[BuildError]:
-    """Parse `cargo build` / `rustc` short-format diagnostics."""
+    """Parse Rust diagnostics from either short-form or multiline rustc output.
+
+    The short format (``cargo build --message-format=short``) is the
+    primary target because it's what ``default_command("rust")`` runs
+    and because it's the most machine-friendly for agent use.  The
+    multiline format is used as a secondary pass so an override
+    command that emits default rustc output still produces structured
+    diagnostics.  Duplicate matches (same file/line/column/severity)
+    are de-duplicated.
+    """
     out: List[BuildError] = []
-    for m in _RUST_RE.finditer(output):
+    seen: set = set()
+
+    def _push(m: "re.Match[str]") -> None:
+        key = (
+            m.group("file"),
+            int(m.group("line")),
+            int(m.group("col")),
+            m.group("severity"),
+        )
+        if key in seen:
+            return
+        seen.add(key)
         out.append(BuildError(
             file=m.group("file"),
             line=int(m.group("line")),
@@ -179,6 +219,11 @@ def parse_rust(output: str) -> List[BuildError]:
             message=m.group("message").strip(),
             code=m.group("code"),
         ))
+
+    for m in _RUST_RE_SHORT.finditer(output):
+        _push(m)
+    for m in _RUST_RE_MULTILINE.finditer(output):
+        _push(m)
     return out
 
 
