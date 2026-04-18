@@ -91,6 +91,10 @@ STANDALONE_MODULES = [
     "trace_capture.py",
     "cost_estimator.py",
     "lsp_bridge.py",
+    # Wave 5: research-grounded (Manus + Don't-Break-the-Cache + ACE guide)
+    "cache_optimizer.py",
+    "task_scratchpad.py",
+    "subagent_dispatch.py",
     # Nested modules
     "agent/skill_index_cache.py",
 ]
