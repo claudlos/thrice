@@ -95,6 +95,29 @@ class TestPrefixGuardTools:
         # First observation defines the baseline.
         assert v.ok
 
+    def test_reorder_only_is_flagged(self):
+        """Tool reorders leave the set identical but every byte of the
+        serialised tool block shifts, killing the KV cache.  Must be
+        reported with a distinct ``tools_reordered`` kind so the caller
+        can choose to auto-repair by restoring the original order."""
+        g = PrefixGuard()
+        g.check(tools=[{"name": "edit"}, {"name": "run"}])
+        v = g.check(tools=[{"name": "run"}, {"name": "edit"}])
+        assert not v.ok
+        assert any(b.kind == "tools_reordered" for b in v.breakages)
+        # Set-based diagnostic must NOT fire — nothing was added or removed.
+        assert not any(b.kind == "tools_changed" for b in v.breakages)
+
+    def test_add_plus_reorder_reports_set_change_not_reorder(self):
+        """When both churn kinds co-occur, the set change is the more
+        actionable diagnostic; report it alone."""
+        g = PrefixGuard()
+        g.check(tools=[{"name": "a"}, {"name": "b"}])
+        v = g.check(tools=[{"name": "c"}, {"name": "a"}])
+        assert not v.ok
+        assert any(b.kind == "tools_changed" for b in v.breakages)
+        assert not any(b.kind == "tools_reordered" for b in v.breakages)
+
 
 # ---------------------------------------------------------------------------
 # PrefixGuard: system-prompt stability

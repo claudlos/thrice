@@ -130,7 +130,11 @@ class PrefixGuard:
     """
 
     def __init__(self):
-        self._last_tools_hash: Optional[str] = None
+        # Set hash detects add/remove (order-insensitive); order hash
+        # detects reorder-only churn (sequence-sensitive).  Keeping them
+        # separate lets us emit precise diagnostics.
+        self._last_tools_set_hash: Optional[str] = None
+        self._last_tools_order_hash: Optional[str] = None
         self._last_tool_names: Tuple[str, ...] = ()
         self._last_system_hash: Optional[str] = None
 
@@ -189,25 +193,41 @@ class PrefixGuard:
 
     def _check_tool_stability(self, tools: Sequence[Dict[str, Any]]) -> List[PrefixBreakage]:
         names = tuple(t.get("name", "") for t in tools)
-        tools_hash = _hash("\x00".join(sorted(names)))
+        # Two hashes so we can distinguish "set churn" from "order churn".
+        # Both are cache-invalidating but the diagnostic is different —
+        # reorders are easy to fix, adds/removes often aren't.
+        set_hash   = _hash("\x00".join(sorted(names)))
+        order_hash = _hash("\x00".join(names))
         out: List[PrefixBreakage] = []
-        if self._last_tools_hash is not None and tools_hash != self._last_tools_hash:
-            added   = set(names) - set(self._last_tool_names)
-            removed = set(self._last_tool_names) - set(names)
-            detail_parts = []
-            if added:
-                detail_parts.append(f"added={sorted(added)}")
-            if removed:
-                detail_parts.append(f"removed={sorted(removed)}")
-            if not detail_parts:
-                detail_parts.append("order changed")
-            out.append(PrefixBreakage(
-                kind="tools_changed",
-                detail=", ".join(detail_parts),
-                location="tools",
-            ))
-        self._last_tools_hash = tools_hash
-        self._last_tool_names = names
+        if self._last_tools_set_hash is not None:
+            prev_set = set(self._last_tool_names)
+            curr_set = set(names)
+            if curr_set != prev_set:
+                added   = curr_set - prev_set
+                removed = prev_set - curr_set
+                detail_parts = []
+                if added:
+                    detail_parts.append(f"added={sorted(added)}")
+                if removed:
+                    detail_parts.append(f"removed={sorted(removed)}")
+                out.append(PrefixBreakage(
+                    kind="tools_changed",
+                    detail=", ".join(detail_parts),
+                    location="tools",
+                ))
+            elif order_hash != self._last_tools_order_hash:
+                # Same set, different order — every byte shifts, cache dies.
+                out.append(PrefixBreakage(
+                    kind="tools_reordered",
+                    detail=(
+                        f"order changed: {list(self._last_tool_names)} -> "
+                        f"{list(names)}"
+                    ),
+                    location="tools",
+                ))
+        self._last_tools_set_hash   = set_hash
+        self._last_tools_order_hash = order_hash
+        self._last_tool_names       = names
         return out
 
 
