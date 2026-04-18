@@ -77,6 +77,8 @@ STANDALONE_MODULES = [
     "change_impact.py",
     "agent_loop_components.py",
     "silent_error_audit.py",
+    # SM-1 concrete state machine (paired with specs/tla/CronJob.tla)
+    "cron_state_machine.py",
     # Nested modules
     "agent/skill_index_cache.py",
 ]
