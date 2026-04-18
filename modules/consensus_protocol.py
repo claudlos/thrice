@@ -5,12 +5,12 @@ Protocol for combining results from multiple agents, detecting conflicts,
 and merging file changes with configurable strategies.
 """
 
-from dataclasses import dataclass, field
-from typing import List, Dict, Optional, Set, Any, Tuple, Callable
-from enum import Enum
-from collections import Counter, defaultdict
-from difflib import SequenceMatcher, unified_diff
 import hashlib
+from collections import Counter, defaultdict
+from dataclasses import dataclass, field
+from difflib import SequenceMatcher
+from enum import Enum
+from typing import Any, Dict, List, Optional, Tuple
 
 
 class ConflictStrategy(str, Enum):
@@ -442,7 +442,7 @@ class DiffMerger:
 
         sm = SequenceMatcher(None, lines_a, lines_b)
         differing_lines = []
-        for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        for tag, i1, i2, _j1, _j2 in sm.get_opcodes():
             if tag != "equal":
                 differing_lines.append(f"lines {i1 + 1}-{i2}")
 

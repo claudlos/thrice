@@ -3,22 +3,38 @@
 import os
 import sys
 import tempfile
+
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "new-files"))
+_HERE = os.path.dirname(__file__)
+for candidate in (
+    os.path.join(_HERE, "..", "modules"),
+    os.path.join(_HERE, "..", "new-files"),
+):
+    if os.path.isdir(candidate):
+        sys.path.insert(0, candidate)
 
-from tool_chain_analysis import (
-    ToolChainLogger, CausalAnalyzer, LoopDetector, Pattern, ChainRecord
-)
+from tool_chain_analysis import CausalAnalyzer, LoopDetector, Pattern, ToolChainLogger  # noqa: E402
 
 
 @pytest.fixture
 def tmp_db():
-    """Create a temporary database for testing."""
+    """Create a temporary database for testing.
+
+    On Windows, SQLite's ``connect()`` context manager commits but doesn't
+    close the underlying file handle, so ``os.unlink`` can fail with
+    ``PermissionError``.  Ignore that case and let the OS reclaim the temp
+    file later - the test is already done either way.
+    """
+    import gc
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
     yield path
-    os.unlink(path)
+    gc.collect()                       # encourage sqlite finalizers to run
+    try:
+        os.unlink(path)
+    except PermissionError:
+        pass                           # Windows: temp file stays until reboot
 
 
 @pytest.fixture

@@ -8,16 +8,13 @@ Flow: detect tests -> run -> parse failures -> generate fix prompt ->
       agent applies fix -> repeat until green or max iterations.
 """
 
-import glob
 import os
 import re
-import subprocess
 import shlex
+import subprocess
 import time
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import Dict, List, Optional, Tuple
-
 
 # ---------------------------------------------------------------------------
 # Data classes
@@ -26,6 +23,8 @@ from typing import Dict, List, Optional, Tuple
 @dataclass
 class TestFixConfig:
     """Configuration for the test-fix loop."""
+    __test__ = False
+
     max_iterations: int = 5
     test_command: str = ""          # auto-detected if empty
     lint_command: str = ""          # optional
@@ -38,6 +37,8 @@ class TestFixConfig:
 @dataclass
 class TestFailure:
     """A single test failure."""
+    __test__ = False
+
     test_name: str = ""
     file_path: str = ""
     line_number: Optional[int] = None
@@ -61,6 +62,8 @@ class TestFailure:
 @dataclass
 class TestRunResult:
     """Result of running a test suite."""
+    __test__ = False
+
     passed: int = 0
     failed: int = 0
     errors: int = 0
@@ -126,6 +129,8 @@ class LoopResult:
 
 class TestDetector:
     """Detects test frameworks, relevant test files, and lint tools."""
+    __test__ = False
+
 
     def detect_test_framework(self, project_root: str) -> Dict[str, str]:
         """Detect the test framework for a project.
@@ -479,9 +484,8 @@ class FailureParser:
             test_name = m.group(1).strip()
             # Look backwards for FAIL file
             before = output[:m.start()]
-            file_m = None
-            for file_m in fail_file_re.finditer(before):
-                pass  # get last one
+            file_matches = list(fail_file_re.finditer(before))
+            file_m = file_matches[-1] if file_matches else None
             if file_m:
                 current_file = file_m.group(1)
 
@@ -736,6 +740,7 @@ class LintOutputParser:
 # ---------------------------------------------------------------------------
 
 class TestFixLoop:
+    __test__ = False
     """Iterative test-fix loop that wires test execution to the agent.
 
     Usage:

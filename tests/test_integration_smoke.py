@@ -2,11 +2,27 @@
 Smoke tests for the integrated Hermes improvements.
 Run with PYTHONPATH pointing to the hermes-agent dir.
 """
-import sys
 import os
+import sys
+
+import pytest
+
+pytestmark = pytest.mark.requires_hermes
 
 # Ensure hermes-agent is on the path
 sys.path.insert(0, os.path.expanduser("~/.hermes/hermes-agent"))
+
+# Some of these tests (TestCronStateMachine) require a hermes-agent with
+# the SM-1 patches already applied.  Skip the whole module if we can't
+# even import the exports they depend on.
+try:
+    from cron.jobs import is_valid_transition  # noqa: F401
+except Exception as _exc:
+    pytest.skip(
+        f"hermes-agent cron.jobs missing SM-1 exports ({_exc!s}); "
+        "run install.py then retry",
+        allow_module_level=True,
+    )
 
 
 class TestToolAliasMap:
@@ -67,18 +83,18 @@ class TestSmartTruncation:
 
 class TestStructuredErrors:
     def test_classify_file_not_found(self):
-        from structured_errors import classify_error, ErrorType
+        from structured_errors import ErrorType, classify_error
         err = classify_error("FileNotFoundError: /tmp/x")
         assert err.error_type == ErrorType.NOT_FOUND
         assert err.recoverable is True
 
     def test_classify_permission_denied(self):
-        from structured_errors import classify_error, ErrorType
+        from structured_errors import ErrorType, classify_error
         err = classify_error("PermissionError: cannot write")
         assert err.error_type == ErrorType.PERMISSION_DENIED
 
     def test_classify_timeout(self):
-        from structured_errors import classify_error, ErrorType
+        from structured_errors import ErrorType, classify_error
         err = classify_error("TimeoutError: operation timed out")
         assert err.error_type == ErrorType.TIMEOUT
 
@@ -174,6 +190,6 @@ class TestEnforcement:
         assert hasattr(EnforcementMode, "TESTING")
 
     def test_get_mode(self):
-        from enforcement import get_enforcement_mode, EnforcementMode
+        from enforcement import EnforcementMode, get_enforcement_mode
         mode = get_enforcement_mode()
         assert mode in EnforcementMode

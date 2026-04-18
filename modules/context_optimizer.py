@@ -51,10 +51,8 @@ from __future__ import annotations
 
 import math
 import re
-from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Dict, List, Optional, Sequence, Tuple
-
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
 
 # ---------------------------------------------------------------------------
 # Token estimation utility
@@ -361,7 +359,7 @@ class ContextOptimizer:
 
         # Remove lowest-importance first until within budget
         removed = set()
-        for score, idx in candidates:
+        for _score, idx in candidates:
             if current_tokens <= budget.optimized_history + budget.recent_context + budget.system_prompt:
                 break
             # Don't orphan tool results
@@ -437,7 +435,6 @@ class RateDistortionAnalyzer:
         if total == 0:
             return "No messages to analyze."
 
-        densities = self.compute_information_density(messages)
         scores = self.scorer.score_all(messages)
 
         # Find low-density, low-importance regions

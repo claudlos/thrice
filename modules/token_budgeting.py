@@ -15,15 +15,12 @@ Classes:
 from __future__ import annotations
 
 import json
-import math
 import os
 import re
 import sqlite3
 import time
-from dataclasses import dataclass, field, asdict
-from pathlib import Path
+from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
-
 
 # ---------------------------------------------------------------------------
 # Data classes
@@ -229,7 +226,7 @@ class SimpleLinearRegression:
         if self.weights is None:
             raise RuntimeError("Model not fitted")
         xa = x + [1.0]
-        return sum(w * v for w, v in zip(self.weights, xa))
+        return sum(w * v for w, v in zip(self.weights, xa, strict=True))
 
     def predict_batch(self, X: List[List[float]]) -> List[float]:
         return [self.predict(x) for x in X]

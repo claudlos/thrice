@@ -21,7 +21,6 @@ Usage:
 """
 
 import re
-from typing import Optional
 
 # ─── Default limits ─────────────────────────────────────────────────────────
 DEFAULT_HEAD_CHARS = 10_000

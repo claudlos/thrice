@@ -23,15 +23,12 @@ Usage (inside run_agent.py):
 See also: agent_loop_migration.md (Phase 1)
 """
 
-import enum
 import logging
 import time
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Set
 
 from agent_loop_state_machine import (
-    Action,
-    AgentLoopContext,
     AgentLoopState,
     AgentLoopStateMachine,
 )

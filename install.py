@@ -83,10 +83,30 @@ STANDALONE_MODULES = [
 
 
 def find_hermes_agent() -> Path:
-    """Auto-detect hermes-agent directory."""
-    candidates = [
+    """Auto-detect hermes-agent directory.
+
+    Checked locations, in priority order:
+
+    1. ``$HERMES_DIR`` environment variable (explicit override).
+    2. ``<cwd>/hermes-agent`` (common dev layout: thrice and hermes-agent
+       side-by-side in a workspace).
+    3. ``~/.hermes/hermes-agent`` (upstream-recommended install path).
+    4. ``~/.config/hermes/hermes-agent`` (XDG-style Linux install).
+    5. ``~/AppData/Local/hermes-agent`` (Windows install under ``LOCALAPPDATA``).
+    6. ``~/AppData/Local/Programs/hermes/hermes-agent`` (alt Windows install).
+
+    Any path with a ``run_agent.py`` at the top level is accepted.
+    """
+    env_override = os.environ.get("HERMES_DIR")
+    candidates: list[Path] = []
+    if env_override:
+        candidates.append(Path(env_override))
+    candidates += [
+        Path.cwd() / "hermes-agent",
         Path.home() / ".hermes" / "hermes-agent",
         Path.home() / ".config" / "hermes" / "hermes-agent",
+        Path.home() / "AppData" / "Local" / "hermes-agent",
+        Path.home() / "AppData" / "Local" / "Programs" / "hermes" / "hermes-agent",
     ]
     for c in candidates:
         if (c / "run_agent.py").exists():

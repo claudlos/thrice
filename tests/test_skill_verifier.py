@@ -2,7 +2,6 @@
 
 import sys
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -10,15 +9,14 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "new-files"))
 
 from skill_verifier import (
-    Skill,
     Cycle,
-    HealthReport,
-    SkillSchema,
     DependencyResolver,
+    HealthReport,
+    Skill,
     SkillHealthCheck,
+    SkillSchema,
     parse_frontmatter,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

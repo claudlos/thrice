@@ -2,15 +2,18 @@
 
 import os
 import subprocess
-import tempfile
-import shutil
-import pytest
 import sys
+
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "new-files"))
 from auto_commit import (
-    AutoCommitManager, UndoManager, CommitRecord,
-    is_auto_commit_enabled, _run_git, GitError, DEFAULT_PREFIX,
+    DEFAULT_PREFIX,
+    AutoCommitManager,
+    GitError,
+    UndoManager,
+    _run_git,
+    is_auto_commit_enabled,
 )
 
 
@@ -232,6 +235,85 @@ class TestConfiguration:
 
 
 class TestGitError:
-    def test_run_git_failure(self, tmp_path):
+    def test_run_git_failure(self, tmp_path, monkeypatch):
+        # ``tmp_path`` may live under a directory that is itself a git repo
+        # (e.g. a developer home dir), so ``git status`` there succeeds by
+        # walking up to the outer repo.  Cap the search with
+        # ``GIT_CEILING_DIRECTORIES`` so git really cannot find one.
+        monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.parent))
         with pytest.raises(GitError):
             _run_git(["status"], str(tmp_path))
+
+
+# ============================================================================
+# Integration: secret_scanner + conventional_commit wiring
+# ============================================================================
+
+class TestSecretScanIntegration:
+    """on_file_edit must block when the staged diff contains a secret."""
+
+    def test_secret_blocks_commit(self, git_repo):
+        mgr = AutoCommitManager(scan_for_secrets=True, conventional_messages=False)
+        assert mgr.enable(git_repo)
+        # Plant a high-severity secret.
+        secret_path = os.path.join(git_repo, "settings.py")
+        with open(secret_path, "w") as f:
+            f.write("AWS_KEY = 'AKIAABCDEFGHIJKLMNOP'\n")
+
+        record = mgr.on_file_edit(secret_path, description="add settings")
+        assert record is None, "commit should have been blocked"
+        assert mgr.last_blocked_findings, "expected at least one finding"
+        # File should be unstaged after block.
+        result = subprocess.run(
+            ["git", "-C", git_repo, "diff", "--cached", "--name-only"],
+            capture_output=True, text=True, check=True,
+        )
+        assert "settings.py" not in result.stdout
+
+    def test_clean_file_commits(self, git_repo):
+        mgr = AutoCommitManager(scan_for_secrets=True, conventional_messages=False)
+        assert mgr.enable(git_repo)
+        clean_path = os.path.join(git_repo, "app.py")
+        with open(clean_path, "w") as f:
+            f.write("def add(a, b):\n    return a + b\n")
+        record = mgr.on_file_edit(clean_path, description="add helper")
+        assert record is not None
+        assert mgr.last_blocked_findings == []
+
+    def test_scan_can_be_disabled(self, git_repo):
+        """With scan_for_secrets=False, the scanner never runs."""
+        mgr = AutoCommitManager(scan_for_secrets=False, conventional_messages=False)
+        assert mgr.enable(git_repo)
+        p = os.path.join(git_repo, "secret.py")
+        with open(p, "w") as f:
+            f.write("TOK = 'AKIAABCDEFGHIJKLMNOP'\n")
+        record = mgr.on_file_edit(p, description="risky")
+        assert record is not None   # went through despite the secret
+
+
+class TestConventionalMessageIntegration:
+    """When conventional_messages=True, the commit message carries a type."""
+
+    def test_prefix_includes_type(self, git_repo):
+        mgr = AutoCommitManager(scan_for_secrets=False, conventional_messages=True)
+        assert mgr.enable(git_repo)
+        tests_dir = os.path.join(git_repo, "tests")
+        os.makedirs(tests_dir, exist_ok=True)
+        p = os.path.join(tests_dir, "test_x.py")
+        with open(p, "w") as f:
+            f.write("def test_x():\n    assert True\n")
+        record = mgr.on_file_edit(p, description="add test for x")
+        assert record is not None
+        # Message should pick up the `test:` type from the path.
+        assert "test:" in record.message
+
+    def test_disabled_keeps_plain_message(self, git_repo):
+        mgr = AutoCommitManager(scan_for_secrets=False, conventional_messages=False)
+        assert mgr.enable(git_repo)
+        p = os.path.join(git_repo, "m.py")
+        with open(p, "w") as f:
+            f.write("x = 1\n")
+        record = mgr.on_file_edit(p, description="new module")
+        assert record is not None
+        assert "feat:" not in record.message
+        assert "refactor:" not in record.message

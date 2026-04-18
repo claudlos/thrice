@@ -3,15 +3,12 @@
 import os
 import sys
 import types
-from unittest import mock
 
 # Set silent mode so the checker doesn't log warnings during tests
 os.environ["HERMES_INVARIANT_MODE"] = "silent"
 
 import pytest
-
 from hermes_invariants import InvariantChecker
-
 
 # =========================================================================
 # Message Integrity

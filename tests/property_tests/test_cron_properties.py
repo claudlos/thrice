@@ -16,23 +16,16 @@ Invariants verified:
   Valid state transitions only
 """
 
-import pytest
-import uuid
-from collections import Counter
-from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional, Set
 
-from hypothesis import settings, HealthCheck, Phase
+import pytest
+from hypothesis import HealthCheck, Phase, settings
 from hypothesis import strategies as st
 from hypothesis.stateful import (
-    Bundle,
     RuleBasedStateMachine,
-    initialize,
     invariant,
-    rule,
     precondition,
-    consumes,
-    multiple,
+    rule,
 )
 
 pytestmark = [pytest.mark.property, pytest.mark.stateful]

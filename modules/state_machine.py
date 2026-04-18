@@ -30,8 +30,7 @@ Usage:
 
 import logging
 import time
-from dataclasses import dataclass, field
-from enum import Enum
+from dataclasses import dataclass
 from typing import (
     Any,
     Callable,

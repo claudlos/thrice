@@ -5,13 +5,12 @@ Analyzes tool call sequences to find patterns, detect loops,
 and suggest optimal orderings based on historical success data.
 """
 
-import sqlite3
 import json
+import sqlite3
 import time
-from dataclasses import dataclass, field
-from typing import List, Dict, Optional, Tuple, Set
 from collections import Counter, defaultdict
-from pathlib import Path
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Tuple
 
 
 @dataclass
@@ -279,7 +278,7 @@ class LoopDetector:
         if len(recent_errors) >= 2 and len(recent_tools) >= 2:
             # If we have errors alternating with tool calls
             error_indices = set()
-            for i, tool in enumerate(recent_tools):
+            for i, _tool in enumerate(recent_tools):
                 if i < len(recent_errors) and recent_errors[i]:
                     error_indices.add(i)
             # Pattern: at least 2 errors in last 4 calls
@@ -304,7 +303,6 @@ class LoopDetector:
                 pattern = recent_tools[-sublen:]
                 repeats = 0
                 for offset in range(0, len(recent_tools) - sublen + 1, sublen):
-                    chunk = recent_tools[-(offset + sublen):len(recent_tools) - offset] if offset > 0 else recent_tools[-sublen:]
                     start = len(recent_tools) - offset - sublen
                     end = len(recent_tools) - offset
                     if start >= 0 and recent_tools[start:end] == pattern:

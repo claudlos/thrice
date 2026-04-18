@@ -14,12 +14,9 @@ import difflib
 import importlib
 import os
 import re
-import sys
-import textwrap
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
-
 
 # ---------------------------------------------------------------------------
 # Data classes
@@ -506,7 +503,7 @@ class LoggingFixer:
         fix = self.suggest_fix(pattern)
         fix_lines = fix.splitlines(keepends=True)
         # Ensure trailing newlines
-        fix_lines = [l if l.endswith("\n") else l + "\n" for l in fix_lines]
+        fix_lines = [ln if ln.endswith("\n") else ln + "\n" for ln in fix_lines]
 
         # Determine how many original lines to replace
         # Replace the except line + the body (pass / ...)

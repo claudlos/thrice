@@ -326,7 +326,7 @@ def match_ignoring_comments(
         return None
 
     # Non-empty lines from the needle
-    needle_lines = [l for l in norm_needle.splitlines() if l.strip()]
+    needle_lines = [ln for ln in norm_needle.splitlines() if ln.strip()]
     haystack_lines = norm_haystack.splitlines()
 
     if not needle_lines:
@@ -337,12 +337,12 @@ def match_ignoring_comments(
     matches: list[int] = []
 
     for i in range(len(haystack_lines) - window_size + 1):
-        window = [l.strip() for l in haystack_lines[i:i + window_size] if l.strip()]
+        window = [ln.strip() for ln in haystack_lines[i:i + window_size] if ln.strip()]
 
         if len(window) != len(needle_lines):
             continue
 
-        if all(w == n for w, n in zip(window, needle_lines)):
+        if all(w == n for w, n in zip(window, needle_lines, strict=True)):
             matches.append(i)
 
     if len(matches) != 1:

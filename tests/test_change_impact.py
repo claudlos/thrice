@@ -6,22 +6,22 @@ Tests for change_impact.py — Dependency-Aware Change Impact Analysis.
 
 import os
 import sys
+
 import pytest
 
 # Add the new-files directory to the path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'new-files'))
 
 from change_impact import (
+    ChangeDetector,
     ChangeType,
     DetectedChange,
-    Usage,
-    ImpactedFile,
-    ChangeDetector,
     ImpactAnalyzer,
+    ImpactedFile,
     ImpactReport,
+    Usage,
     quick_impact_check,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

@@ -6,42 +6,55 @@ operations and check invariants after every step.  Standalone unit tests cover
 exhaustive transition tables, initial states, roundtrips, and terminal states.
 """
 
-import json
-import os
 import tempfile
 from pathlib import Path
 from typing import Set
 
 import pytest
-from hypothesis import given, settings, HealthCheck, Phase
-from hypothesis import strategies as st
+from hypothesis import HealthCheck, Phase, settings
+
+# The rest of this module drives the live ``cron.jobs`` API; skip entirely
+# if Hermes isn't on PYTHONPATH so collection doesn't die on imports.
+cron_jobs = pytest.importorskip(
+    "cron.jobs",
+    reason="hermes-agent cron.jobs not available",
+)
+if not hasattr(cron_jobs, "create_job"):
+    pytest.skip(
+        "cron.jobs is stubbed; real hermes-agent cron module required",
+        allow_module_level=True,
+    )
+
+pytestmark = pytest.mark.requires_hermes
 from hypothesis.stateful import (
-    Bundle,
     RuleBasedStateMachine,
-    initialize,
     invariant,
-    rule,
     precondition,
+    rule,
 )
 
-import cron.jobs
-from cron.jobs import (
-    create_job,
-    pause_job,
-    resume_job,
-    trigger_job,
-    remove_job,
-    mark_job_run,
-    get_job,
-    list_jobs,
-    load_jobs,
-    save_jobs,
-    JOB_STATES,
-    VALID_TRANSITIONS,
-    is_valid_transition,
-    job_is_active,
-    JOBS_FILE,
-)
+try:
+    import cron.jobs
+    from cron.jobs import (
+        JOB_STATES,
+        VALID_TRANSITIONS,
+        create_job,
+        get_job,
+        is_valid_transition,
+        job_is_active,
+        load_jobs,
+        mark_job_run,
+        pause_job,
+        remove_job,
+        resume_job,
+        trigger_job,
+    )
+except Exception as exc:  # ImportError, AttributeError, etc.
+    pytest.skip(
+        f"hermes-agent cron.jobs not compatible ({exc!s}); "
+        "install a recent hermes-agent to run these tests",
+        allow_module_level=True,
+    )
 
 
 # =============================================================================

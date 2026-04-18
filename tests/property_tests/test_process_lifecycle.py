@@ -14,20 +14,28 @@ Invariants verified:
   INV-P9: CapacityLimit
 """
 
-import pytest
 import time
-from typing import Dict, Optional, Set
+from typing import Dict, Optional
 
-from hypothesis import settings, HealthCheck, Phase
+import pytest
+from hypothesis import HealthCheck, Phase, settings
 from hypothesis import strategies as st
 from hypothesis.stateful import (
     RuleBasedStateMachine,
     invariant,
-    rule,
     precondition,
+    rule,
 )
 
-pytestmark = [pytest.mark.property, pytest.mark.stateful]
+pytestmark = [pytest.mark.property, pytest.mark.stateful, pytest.mark.requires_hermes]
+
+# The nested import on line ~218 pulls in ``invariants.process_invariants``
+# which lives inside hermes-agent.  Skip the whole module when it's absent
+# so collection doesn't blow up on PYTHONPATH-less CI.
+pytest.importorskip(
+    "invariants.process_invariants",
+    reason="hermes-agent invariants.process_invariants not available",
+)
 
 MAX_PROCESSES = 20  # lower limit for testing
 
@@ -211,18 +219,16 @@ TestProcessRegistryStateMachine.settings = settings(
 # Standalone property tests
 # ============================================================================
 
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "thrice"))
 
-from invariants.process_invariants import (
-    ProcessInvariantChecker,
-    infer_process_state,
-    PROCESS_STATES,
-    _VALID_PROCESS_TRANSITIONS,
-)
-
 from hypothesis import given
+from invariants.process_invariants import (
+    PROCESS_STATES,
+    ProcessInvariantChecker,
+)
 
 
 @pytest.mark.property

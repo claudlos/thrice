@@ -1,7 +1,7 @@
 """Tests for the Reproduce-First Debugging workflow module."""
 
-import sys
 import os
+import sys
 import unittest
 
 # Add the new-files directory to path so we can import the module
@@ -11,14 +11,13 @@ from reproduce_first import (
     BugAnalyzer,
     BugType,
     FileLocation,
-    ReproductionResult,
     ReproduceFirstWorkflow,
-    detect_bug_report,
-    generate_debug_prompt,
+    ReproductionResult,
     _generate_reproduction_script,
     _suggest_fix_approach,
+    detect_bug_report,
+    generate_debug_prompt,
 )
-
 
 # ─── Sample Error Texts ───────────────────────────────────────────────────
 

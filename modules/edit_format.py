@@ -28,12 +28,11 @@ Usage:
     # => EditFormat.WHOLE_FILE (small file)
 """
 
-import re
 import difflib
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, List, Optional, Tuple
-
 
 # ─── Enums ──────────────────────────────────────────────────────────────────
 
@@ -391,7 +390,8 @@ class FormatParser:
         """
         operations = []
         for match in _XML_EDIT_RE.finditer(text):
-            label = match.group(1)
+            # match.group(1) is the block label; kept in the regex for symmetry
+            # with other formats but not used here.
             start_line = int(match.group(2))
             end_line = int(match.group(3))
             old_content = match.group(4).strip()

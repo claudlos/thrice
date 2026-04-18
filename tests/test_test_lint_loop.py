@@ -3,11 +3,9 @@
 import json
 import os
 import subprocess
+import sys
 import tempfile
 from unittest.mock import MagicMock, patch
-
-import pytest
-import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "new-files"))
 
@@ -21,9 +19,7 @@ from test_lint_loop import (
     TestResult,
     TestRunner,
     detect_framework,
-    quick_test,
 )
-
 
 # ---------------------------------------------------------------------------
 # Framework detection tests

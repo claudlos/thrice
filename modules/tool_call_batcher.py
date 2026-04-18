@@ -6,14 +6,13 @@ Analyzes dependencies between tool calls, predicts next likely calls,
 and advises on optimal batching strategies for improved throughput.
 """
 
+import re
 import time
 import uuid
-import re
-from dataclasses import dataclass, field
-from typing import List, Dict, Optional, Tuple, Set
 from collections import defaultdict
+from dataclasses import dataclass, field
 from enum import Enum
-
+from typing import Dict, List, Optional, Set, Tuple
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -115,7 +114,7 @@ class DependencyGraph:
             return []
 
         in_degree: Dict[str, int] = {cid: 0 for cid in self.nodes}
-        for src, targets in self.edges.items():
+        for _src, targets in self.edges.items():
             for tgt in targets:
                 if tgt in in_degree:
                     in_degree[tgt] += 1
@@ -581,7 +580,7 @@ class BatchingAdvisor:
 
         # Map records back to original dicts by index
         id_to_dict: Dict[str, Dict] = {}
-        for rec, orig in zip(records, pending_calls):
+        for rec, orig in zip(records, pending_calls, strict=True):
             id_to_dict[rec.call_id] = orig
 
         return [

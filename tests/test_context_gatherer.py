@@ -6,22 +6,19 @@ Uses tmp_path (pytest) to create realistic project layouts on disk.
 
 import os
 import sys
-import pytest
 
 # Ensure the module can be imported
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "new-files"))
 
 from context_gatherer import (
+    ContextGatherer,
+    ContextPrioritizer,
     ContextRequest,
     GatheredContext,
     ImportExtractor,
     TestFileFinder,
-    ContextPrioritizer,
-    ContextGatherer,
     format_for_prompt,
-    CHARS_PER_TOKEN,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

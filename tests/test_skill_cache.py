@@ -1,11 +1,10 @@
 """Tests for SkillIndexCache — TTL, mtime invalidation, thread safety, stats."""
 
-import os
 import sys
 import threading
 import time
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -13,7 +12,6 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "new-files"))
 
 from skill_index_cache import SkillIndexCache, get_default_cache, reset_default_cache
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -127,12 +125,20 @@ class TestMtimeInvalidation:
 
     def test_mtime_change_busts_cache(self, cache, tmp_skills):
         """Changing a SKILL.md file mtime should invalidate the cache."""
+        import os
+        import time
+
         with patch.object(cache, "_build", return_value="original"):
             cache.get_skill_index()
 
-        # Modify a skill file
+        # Modify a skill file, then bump mtime explicitly so the test is
+        # deterministic on filesystems with coarse mtime resolution
+        # (Windows NTFS/FAT can report identical ns timestamps for writes
+        # that happen within the same file-system tick).
         skill_file = tmp_skills / "devops" / "deploy-aws" / "SKILL.md"
         skill_file.write_text("---\nname: deploy-aws\ndescription: Updated\n---\n")
+        later = time.time() + 2.0
+        os.utime(skill_file, (later, later))
 
         # Force mtime check cooldown to pass
         cache._last_mtime_check = 0.0

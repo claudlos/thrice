@@ -1,11 +1,7 @@
 """Tests for Self-Improving Test Suite — TrajectoryExtractor, TestGenerator, TestSuiteManager."""
 
-import json
-import os
 import sys
-import time
 from pathlib import Path
-from unittest.mock import patch, MagicMock
 
 import pytest
 
@@ -14,15 +10,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "new-files"))
 
 from self_improving_tests import (
     Outcome,
+    TestGenerator,
+    TestSuiteManager,
     ToolCall,
     Trajectory,
     TrajectoryExtractor,
-    TestGenerator,
-    TestSuiteManager,
-    TestResults,
     on_session_complete,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

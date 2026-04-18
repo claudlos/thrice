@@ -34,16 +34,11 @@ Usage:
 
 import enum
 import logging
-import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from state_machine import (
     ANY_STATE,
-    GuardFailed,
-    GuardFn,
-    InvariantViolation,
-    InvalidTransition,
     StateMachine,
     TransitionDef,
     TransitionRecord,
@@ -645,10 +640,16 @@ class AgentLoopStateMachine:
 
         PREPARING_API_CALL -> CALLING_API  (when has_budget)
         Guard: has_budget
+
+        The iteration counter is incremented *after* the guard check so the
+        guard sees the pre-increment value (matches TLA+ ``BuildRequest`` in
+        ``specs/tla/AgentLoop.tla`` where ``iterationsUsed' = iterationsUsed
+        + 1`` is atomic with the transition).
         """
         self._loop_ctx.api_params = api_params
+        record = self._sm.apply(Action.BUILD_REQUEST, self._ctx())
         self._loop_ctx.increment_iteration()
-        return self._sm.apply(Action.BUILD_REQUEST, self._ctx())
+        return record
 
     def exhaust_budget(self) -> TransitionRecord:
         """Signal that the budget is exhausted.
@@ -758,10 +759,15 @@ class AgentLoopStateMachine:
 
         ERROR_RECOVERY -> CALLING_API
         Guard: can_retry
+
+        The generic ``StateMachine.apply`` raises on guard failure, so
+        reaching the line after it always means the transition was
+        accepted.  Matches TLA+ ``RetryAPI`` in ``specs/tla/AgentLoop.tla``
+        where ``retryCount' = retryCount + 1`` happens unconditionally
+        with the transition.
         """
         result = self._sm.apply(Action.RETRY_API, self._ctx())
-        if result.accepted:
-            self._loop_ctx.retry_count += 1
+        self._loop_ctx.retry_count += 1
         return result
 
     def interrupt(self) -> TransitionRecord:

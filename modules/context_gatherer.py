@@ -8,14 +8,12 @@ inclusion in LLM prompts.
 Uses only stdlib: ast, re, os, pathlib. No external dependencies.
 """
 
-import ast
 import os
 import re
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
-
 
 # ---------------------------------------------------------------------------
 # Language extensions
@@ -184,6 +182,8 @@ class ImportExtractor:
 
 class TestFileFinder:
     """Finds test files associated with a source file."""
+    __test__ = False
+
 
     # Patterns to try: (directory_pattern, filename_pattern)
     # {stem} is replaced with the source file's stem (name without extension)

@@ -19,16 +19,14 @@ Usage:
     suggestion = selector.suggest_tool("search for errors in logs", ["grep", "read_file", "search"])
 """
 
-import os
 import json
-import time
-import sqlite3
 import logging
 import math
-from collections import Counter, defaultdict
-from dataclasses import dataclass, field
-from typing import List, Optional, Tuple, Dict, Any
-from pathlib import Path
+import sqlite3
+import time
+from collections import Counter
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -230,7 +228,7 @@ class _LogisticClassifier:
             binary_y = [1.0 if label == cls else 0.0 for label in y]
 
             for _ in range(self.epochs):
-                for vec, target in zip(X, binary_y):
+                for vec, target in zip(X, binary_y, strict=True):
                     pred = self._sigmoid(self._dot(vec, weights) + bias)
                     error = pred - target
                     # Update weights

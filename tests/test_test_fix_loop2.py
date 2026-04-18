@@ -6,8 +6,6 @@ import tempfile
 import textwrap
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 # Ensure the module is importable
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "new-files"))
 
@@ -23,7 +21,6 @@ from test_fix_loop import (
     TestFixLoop,
     TestRunResult,
 )
-
 
 # ===========================================================================
 # TestFixConfig tests

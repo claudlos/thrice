@@ -13,7 +13,7 @@ import re
 import subprocess
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, List, Optional
 
 # ---------------------------------------------------------------------------
 # Data classes
@@ -56,6 +56,8 @@ class ParsedError:
 @dataclass
 class TestResult:
     """Result of running tests."""
+    __test__ = False
+
     passed: int = 0
     failed: int = 0
     errors: int = 0
@@ -161,6 +163,8 @@ GENERIC_ERROR_RE = re.compile(
 
 class TestRunner:
     """Detects frameworks and runs tests/linting."""
+    __test__ = False
+
 
     def __init__(self, timeout: int = 120):
         self.timeout = timeout
@@ -213,7 +217,7 @@ class TestRunner:
             return Framework.MAKE
 
         # Fallback: check for any Python test files
-        for root, dirs, files in os.walk(project_dir):
+        for _root, dirs, files in os.walk(project_dir):
             dirs[:] = [d for d in dirs if d not in {"node_modules", ".git", "__pycache__", "venv", ".venv"}]
             for f in files:
                 if f.startswith("test_") and f.endswith(".py"):

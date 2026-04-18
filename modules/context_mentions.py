@@ -246,15 +246,33 @@ class MentionResolver:
         return "\n".join(parts)
 
     def _resolve_file(self, mention: Mention, cwd: str) -> str:
-        """Resolve @file:path -> file contents."""
+        """Resolve @file:path -> file contents.
+
+        Paths are constrained to ``cwd`` (after resolving ``..``, symlinks,
+        and ``~``) so an attacker-controlled prompt cannot exfiltrate
+        arbitrary files via ``@file:/etc/passwd`` or ``@file:../../secrets``.
+        """
         if mention.arg is None:
             return "[No file path specified]"
-        filepath = os.path.join(cwd, mention.arg)
-        filepath = os.path.expanduser(filepath)
-        if not os.path.isfile(filepath):
+        raw = os.path.expanduser(mention.arg)
+        # os.path.join drops cwd if raw is absolute, which is exactly what we
+        # do NOT want.  Force the join to stay under cwd by stripping any
+        # leading separators from the user-supplied path.
+        safe_rel = raw.lstrip("/\\")
+        candidate = os.path.realpath(os.path.join(os.path.realpath(cwd), safe_rel))
+        cwd_real = os.path.realpath(cwd)
+        # On Windows, case-insensitive containment check.
+        try:
+            common = os.path.commonpath([cwd_real, candidate])
+        except ValueError:
+            # Different drives on Windows
+            return f"[File outside working directory: {mention.arg}]"
+        if os.path.normcase(common) != os.path.normcase(cwd_real):
+            return f"[File outside working directory: {mention.arg}]"
+        if not os.path.isfile(candidate):
             return f"[File not found: {mention.arg}]"
         try:
-            with open(filepath, "r", encoding="utf-8", errors="replace") as f:
+            with open(candidate, "r", encoding="utf-8", errors="replace") as f:
                 return f.read()
         except Exception as e:
             return f"[Error reading {mention.arg}: {e}]"

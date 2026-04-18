@@ -5,11 +5,11 @@ Builder-pattern message construction with type-level guarantees,
 validation, and auto-fixing for LLM conversation message sequences.
 """
 
-from dataclasses import dataclass, field
-from typing import List, Dict, Optional, Any, Tuple
-from enum import Enum
 from collections import defaultdict
 from copy import deepcopy
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Dict, List, Optional
 
 
 class Role(str, Enum):

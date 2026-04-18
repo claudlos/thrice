@@ -15,21 +15,24 @@ This is the "simulation relation" between the TLA+ spec and Python impl.
 
 import os
 import sys
-import pytest
 from datetime import datetime, timedelta, timezone
-from itertools import product
+
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "thrice"))
 
-from invariants.cron_invariants import (
-    CronJobInvariantChecker,
-    infer_cron_state,
-    CRON_STATES,
-    _VALID_CRON_TRANSITIONS,
-    VALID_SCHEDULE_KINDS,
+pytest.importorskip(
+    "invariants.cron_invariants",
+    reason="hermes-agent invariants.cron_invariants not available",
 )
 
-pytestmark = pytest.mark.refinement
+from invariants.cron_invariants import (  # noqa: E402
+    _VALID_CRON_TRANSITIONS,
+    CRON_STATES,
+    infer_cron_state,
+)
+
+pytestmark = [pytest.mark.refinement, pytest.mark.requires_hermes]
 
 
 # -- Helpers ------------------------------------------------------------------

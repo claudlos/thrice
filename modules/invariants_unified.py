@@ -24,7 +24,7 @@ Usage:
 
 import logging
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,6 @@ logger = logging.getLogger(__name__)
 try:
     from enforcement import (
         EnforcementMode,
-        InvariantViolation as EnforcementViolation,
         ViolationCollector,
         check_invariants_after,
         enforce,
@@ -40,6 +39,9 @@ try:
         get_global_collector,
         is_silent,
         reset_global_collector,
+    )
+    from enforcement import (
+        InvariantViolation as EnforcementViolation,
     )
 except ImportError:
     # Stub if enforcement.py not on path

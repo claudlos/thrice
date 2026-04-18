@@ -12,27 +12,21 @@ Tests cover:
 - Full loop simulation
 """
 
-import sys
 import os
-import time
-
-import pytest
+import sys
 
 # Ensure the new-files directory is on the path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "new-files"))
 
-from agent_loop_state_machine import (
-    Action,
-    AgentLoopState,
-    AgentLoopStateMachine,
-)
 from agent_loop_shadow import (
     AgentLoopShadow,
     DivergenceRecord,
     _derive_expected_state,
     _states_compatible,
 )
-
+from agent_loop_state_machine import (
+    AgentLoopState,
+)
 
 # ---------------------------------------------------------------------------
 # Initialization

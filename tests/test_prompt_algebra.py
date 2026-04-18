@@ -3,25 +3,25 @@
 Includes both unit tests and property-based tests using hypothesis.
 """
 
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "new-files"))
 
 import pytest
 from prompt_algebra import (
-    Priority,
-    PromptSegment,
-    PromptBudget,
-    PromptVerifier,
     BudgetExceededError,
+    Priority,
+    PromptBudget,
+    PromptSegment,
+    PromptVerifier,
     compose,
-    truncate,
     prioritize,
-    estimate_tokens,
+    truncate,
 )
 
 try:
-    from hypothesis import given, settings, assume
+    from hypothesis import assume, given, settings
     from hypothesis import strategies as st
     HAS_HYPOTHESIS = True
 except ImportError:

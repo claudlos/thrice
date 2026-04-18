@@ -1,22 +1,22 @@
 """Tests for debugging_guidance module."""
 
-import sys
 import os
+import sys
+
 import pytest
 
 # Add the new-files directory to path so we can import the module
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'new-files'))
 
 from debugging_guidance import (
-    DEBUGGING_GUIDANCE,
     CODING_BEST_PRACTICES,
-    get_debugging_prompt,
-    should_inject_debugging_guidance,
-    count_recent_errors,
-    is_repeated_failure,
+    DEBUGGING_GUIDANCE,
     _extract_text_from_message,
+    count_recent_errors,
+    get_debugging_prompt,
+    is_repeated_failure,
+    should_inject_debugging_guidance,
 )
-
 
 # ── Constants tests ──────────────────────────────────────────────────────
 

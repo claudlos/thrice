@@ -5,9 +5,8 @@ Tests for agent_loop_components.py — Agent Loop Decomposition.
 IterationTracker, and CostTracker.
 """
 
-import sys
 import os
-import time
+import sys
 
 import pytest
 
@@ -15,16 +14,15 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "new-files"))
 
 from agent_loop_components import (
+    CostTracker,
+    ErrorClass,
+    IterationTracker,
+    MessageProcessor,
+    RetryConfig,
+    RetryEngine,
     ToolDispatcher,
     ToolResult,
-    RetryEngine,
-    RetryConfig,
-    ErrorClass,
-    MessageProcessor,
-    IterationTracker,
-    CostTracker,
 )
-
 
 # ===========================================================================
 # ToolDispatcher tests

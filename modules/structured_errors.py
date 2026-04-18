@@ -22,10 +22,9 @@ Usage:
 
 import json
 import re
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional, Union
-
 
 # ─── Error Type Enum ────────────────────────────────────────────────────────
 

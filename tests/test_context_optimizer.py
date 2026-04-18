@@ -1,19 +1,18 @@
 """Tests for context_optimizer.py — Information-Theoretic Context Optimization."""
 
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "new-files"))
 
-import pytest
 from context_optimizer import (
-    MessageImportance,
-    ContextOptimizer,
-    RateDistortionAnalyzer,
     BudgetAllocation,
+    ContextOptimizer,
+    MessageImportance,
+    RateDistortionAnalyzer,
     estimate_tokens,
     message_tokens,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

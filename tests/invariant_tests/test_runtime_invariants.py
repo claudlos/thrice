@@ -6,11 +6,20 @@ Tests every public method of InvariantChecker with valid and invalid inputs.
 
 import os
 import sys
-import types
+
 import pytest
 
-# Ensure hermes_invariants is importable
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "new-files"))
+# Ensure hermes_invariants is importable.  Historically this module lived
+# under ``new-files/``; the canonical home is ``modules/hermes_invariants.py``
+# (conftest.py puts ``modules/`` on sys.path automatically).  The legacy path
+# is kept as a fallback so old checkouts continue to work.
+_HERE = os.path.dirname(__file__)
+for candidate in (
+    os.path.join(_HERE, "..", "..", "modules"),
+    os.path.join(_HERE, "..", "..", "new-files"),
+):
+    if os.path.isdir(candidate):
+        sys.path.insert(0, candidate)
 
 from hermes_invariants import InvariantChecker
 

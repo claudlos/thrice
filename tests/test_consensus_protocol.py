@@ -2,13 +2,17 @@
 
 import os
 import sys
+
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "new-files"))
 
 from consensus_protocol import (
-    AgentResult, ConsensusProtocol, DiffMerger, ConsensusVerifier,
-    Conflict, Resolution, MergedResult, MergedChange
+    AgentResult,
+    Conflict,
+    ConsensusProtocol,
+    ConsensusVerifier,
+    DiffMerger,
 )
 
 

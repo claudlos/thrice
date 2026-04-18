@@ -29,9 +29,7 @@ import time
 import uuid
 import zlib
 from dataclasses import asdict, dataclass, field
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-
 
 # ---------------------------------------------------------------------------
 # Data classes

@@ -24,9 +24,7 @@ from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
 from state_machine import (
-    ANY_STATE,
     GuardFailed,
-    InvariantViolation,
     InvalidTransition,
     StateMachine,
     TransitionDef,
@@ -355,14 +353,36 @@ class CronJobStateMachine:
         self,
         next_run_at: Optional[datetime] = None,
     ) -> TransitionRecord:
-        """Mark job run as successful: running -> scheduled or completed."""
+        """Mark job run as successful: running -> scheduled or completed.
+
+        The abstract TLA+ action ``MarkSuccessDone`` atomically clears
+        ``nextRunDue`` in the same step as the state transition.  To refine
+        that faithfully the context here is pre-updated for whichever branch
+        the guards will pick, so ``TerminalNoNextRun`` holds during the
+        invariant check that ``apply`` runs.
+        """
+        recurring = self._sm.context.get("recurring", False)
+        runs_left = self._sm.context.get("runs_left")
+        will_complete = (not recurring) or (
+            runs_left is not None and runs_left <= 0
+        )
+
+        # Atomically stage the target next_run_at before the transition
+        # so the invariant check sees a consistent context.
+        if will_complete:
+            self._sm.context["next_run_at"] = None
+            self._sm.context["enabled"] = False
+        else:
+            self._sm.context["next_run_at"] = next_run_at
+
         ctx = {
-            "recurring": self._sm.context.get("recurring", False),
-            "runs_left": self._sm.context.get("runs_left"),
+            "recurring": recurring,
+            "runs_left": runs_left,
         }
         record = self._sm.apply("mark_success", context=ctx)
 
-        # Update counters
+        # Post-apply: update counters (these don't participate in the
+        # atomic guard/invariant set above).
         self._sm.context["runs_completed"] = (
             self._sm.context.get("runs_completed", 0) + 1
         )
@@ -370,15 +390,8 @@ class CronJobStateMachine:
             self._sm.context["runs_left"] = max(
                 0, self._sm.context["runs_left"] - 1
             )
-
-        # Reset retry count on success
         self._sm.context["retry_count"] = 0
         self._sm.context["last_error"] = None
-
-        if self._sm.state == "scheduled":
-            self._sm.context["next_run_at"] = next_run_at
-        elif self._sm.state == "completed":
-            self._sm.context["next_run_at"] = None
 
         return record
 

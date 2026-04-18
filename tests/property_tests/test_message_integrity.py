@@ -11,10 +11,16 @@ Properties verified:
 """
 
 import pytest
-from hypothesis import given, settings, HealthCheck, assume
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
-pytestmark = [pytest.mark.property]
+pytestmark = [pytest.mark.property, pytest.mark.requires_hermes]
+
+# ``invariants.message_invariants`` lives in hermes-agent; skip if missing.
+pytest.importorskip(
+    "invariants.message_invariants",
+    reason="hermes-agent invariants.message_invariants not available",
+)
 
 
 # ============================================================================
@@ -100,14 +106,13 @@ def random_message(draw):
 # Import the checker (from thrice or new-files)
 # ============================================================================
 
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "thrice"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "new-files"))
 
 from invariants.message_invariants import MessageInvariantChecker
-from invariants.base import InvariantError
-
 
 # ============================================================================
 # Property: well-formed conversations pass all checks

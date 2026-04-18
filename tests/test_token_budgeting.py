@@ -1,27 +1,22 @@
 """Tests for Predictive Token Budgeting (#18)."""
 
-import json
 import os
-import tempfile
-import pytest
 import sys
+import tempfile
+
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "new-files"))
 
 from token_budgeting import (
-    FeatureVector,
-    BudgetPrediction,
-    BudgetAdvice,
-    SessionFeatureExtractor,
-    SimpleLinearRegression,
-    BudgetPredictor,
     BudgetAdvisor,
+    BudgetPrediction,
+    BudgetPredictor,
+    FeatureVector,
+    SessionFeatureExtractor,
     SessionLogger,
-    COMPLEXITY_KEYWORDS,
-    MODEL_CONTEXT_SIZES,
-    MODEL_COSTS,
+    SimpleLinearRegression,
 )
-
 
 # ---------------------------------------------------------------------------
 # FeatureVector

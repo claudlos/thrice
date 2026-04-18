@@ -22,20 +22,19 @@ Usage:
     test_code = generator.generate_regression_test(trajectory)
 """
 
+import ast
 import hashlib
 import json
 import logging
-import os
 import re
-import ast
 import subprocess
+import sys
 import textwrap
 import time
-import sys
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -231,6 +230,8 @@ class TrajectoryExtractor:
 
 class TestGenerator:
     """Generate Python test code from trajectories."""
+    __test__ = False
+
 
     REGRESSION_TEMPLATE = textwrap.dedent('''\
         """Auto-generated regression test from session {session_id}.
@@ -371,6 +372,8 @@ class TestGenerator:
 @dataclass
 class TestResult:
     """Result of running a single test."""
+    __test__ = False
+
     test_file: str
     passed: bool
     error: str = ""
@@ -380,6 +383,8 @@ class TestResult:
 @dataclass
 class TestResults:
     """Aggregate results from running the test suite."""
+    __test__ = False
+
     results: List[TestResult] = field(default_factory=list)
     total: int = 0
     passed: int = 0
@@ -398,6 +403,8 @@ class TestSuiteManager:
     Tests are stored as individual Python files in a configurable directory,
     defaulting to ~/.hermes/auto_tests/.
     """
+    __test__ = False
+
 
     def __init__(self, tests_dir: Optional[Path] = None):
         self._tests_dir = tests_dir or Path.home() / ".hermes" / "auto_tests"

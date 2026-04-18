@@ -2,15 +2,19 @@
 
 import os
 import subprocess
-import tempfile
-from unittest.mock import MagicMock, patch
-
-import pytest
 import sys
+import tempfile
+from unittest.mock import patch
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "new-files"))
+_HERE = os.path.dirname(__file__)
+for candidate in (
+    os.path.join(_HERE, "..", "modules"),
+    os.path.join(_HERE, "..", "new-files"),
+):
+    if os.path.isdir(candidate):
+        sys.path.insert(0, candidate)
 
-from context_mentions import (
+from context_mentions import (  # noqa: E402
     Mention,
     MentionResolver,
     MentionResult,
@@ -21,7 +25,6 @@ from context_mentions import (
     process_message_mentions,
     set_recent_errors,
 )
-
 
 # ---------------------------------------------------------------------------
 # parse_mentions tests
@@ -308,3 +311,55 @@ class TestErrorStorage:
         original.append("error2")
         assert get_recent_errors() == ["error1"]
         clear_recent_errors()
+
+
+class TestResolveFilePathTraversal:
+    """Regression tests for the @file: path-traversal guard."""
+
+    def setup_method(self):
+        self.resolver = MentionResolver()
+
+    def _resolve(self, arg: str, cwd: str) -> str:
+        m = Mention(kind="file", arg=arg, start=0, end=0, raw=f"@file:{arg}")
+        return self.resolver._resolve_file(m, cwd)
+
+    def test_absolute_path_is_rejected(self, tmp_path):
+        """@file:/etc/passwd must not escape the cwd."""
+        # Create a secret file OUTSIDE cwd and a "cwd" sandbox
+        secret = tmp_path / "secret.txt"
+        secret.write_text("do not leak")
+        sandbox = tmp_path / "sandbox"
+        sandbox.mkdir()
+        (sandbox / "ok.txt").write_text("fine")
+
+        out = self._resolve(str(secret), str(sandbox))
+        assert "do not leak" not in out
+        assert "outside working directory" in out or "File not found" in out
+
+    def test_parent_traversal_is_rejected(self, tmp_path):
+        """@file:../secret.txt must not escape via ``..``."""
+        secret = tmp_path / "secret.txt"
+        secret.write_text("sensitive")
+        sandbox = tmp_path / "sandbox"
+        sandbox.mkdir()
+
+        out = self._resolve("../secret.txt", str(sandbox))
+        assert "sensitive" not in out
+        assert "outside working directory" in out or "File not found" in out
+
+    def test_normal_relative_path_still_works(self, tmp_path):
+        """Sanity: legitimate in-sandbox reads are not broken by the guard."""
+        sandbox = tmp_path / "sandbox"
+        sandbox.mkdir()
+        (sandbox / "ok.txt").write_text("hello world")
+
+        out = self._resolve("ok.txt", str(sandbox))
+        assert out == "hello world"
+
+    def test_nested_relative_path_works(self, tmp_path):
+        sandbox = tmp_path / "sandbox"
+        (sandbox / "sub").mkdir(parents=True)
+        (sandbox / "sub" / "file.md").write_text("nested")
+
+        out = self._resolve("sub/file.md", str(sandbox))
+        assert out == "nested"

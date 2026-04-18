@@ -11,23 +11,21 @@ import sqlite3
 import sys
 import tempfile
 import time
-import zlib
 import unittest
 
 # Ensure the new-files directory is importable
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "new-files"))
 
 from conversation_checkpoint import (
-    CheckpointInfo,
     CheckpointManager,
     ConversationState,
     DiffCheckpoint,
-    deserialize_state,
-    serialize_state,
-    _compute_diff,
     _apply_diff,
+    _compute_diff,
     _compute_hash,
     _generate_checkpoint_id,
+    deserialize_state,
+    serialize_state,
 )
 
 

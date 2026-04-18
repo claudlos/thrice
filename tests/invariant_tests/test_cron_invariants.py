@@ -19,23 +19,29 @@ Plus state transition validation and state inference.
 
 import os
 import sys
-import pytest
 from datetime import datetime, timedelta, timezone
+
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "thrice"))
 
-from invariants.cron_invariants import (
+# ``invariants.cron_invariants`` lives inside the hermes-agent checkout.
+# Skip collection if it's missing so module-level imports don't error out.
+pytest.importorskip(
+    "invariants.cron_invariants",
+    reason="hermes-agent invariants.cron_invariants not available",
+)
+
+from invariants.cron_invariants import (  # noqa: E402
+    _VALID_CRON_TRANSITIONS,
+    CRON_STATES,
+    VALID_SCHEDULE_KINDS,
     CronJobInvariantChecker,
     infer_cron_state,
     validate_jobs_list,
-    CRON_STATES,
-    _VALID_CRON_TRANSITIONS,
-    VALID_SCHEDULE_KINDS,
-    VALID_STATUSES,
 )
-from invariants.base import InvariantError
 
-pytestmark = pytest.mark.invariant
+pytestmark = [pytest.mark.invariant, pytest.mark.requires_hermes]
 
 
 # -- Helpers ------------------------------------------------------------------

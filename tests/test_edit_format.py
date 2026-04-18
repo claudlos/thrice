@@ -5,8 +5,8 @@ Tests for edit_format module — Edit Format Optimization.
 FormatParser, FormatTracker, EditOperation, and EditRegion.
 """
 
-import sys
 import os
+import sys
 import unittest
 
 # Ensure new-files directory is on the path
@@ -21,7 +21,6 @@ from edit_format import (
     FormatParser,
     FormatTracker,
 )
-
 
 # ─── EditFormat enum tests ──────────────────────────────────────────────────
 

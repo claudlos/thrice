@@ -4,8 +4,8 @@ import os
 import sys
 import tempfile
 import textwrap
-import time
 import threading
+import time
 import unittest
 
 # Add parent to path
@@ -14,15 +14,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "new-files"))
 from repo_map import (
     RepoMap,
     RepoMapCache,
-    parse_file,
+    _parse_go,
+    _parse_js_ts,
+    _parse_python,
+    _parse_rust,
     get_repo_map,
     invalidate_repo_map,
-    Symbol,
-    FileInfo,
-    _parse_python,
-    _parse_js_ts,
-    _parse_go,
-    _parse_rust,
+    parse_file,
 )
 
 

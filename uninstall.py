@@ -14,9 +14,17 @@ MANIFEST_NAME = ".hermes-improvements-manifest.json"
 
 
 def find_hermes_agent() -> Path:
-    candidates = [
+    """Find hermes-agent directory - matches install.py::find_hermes_agent."""
+    env_override = os.environ.get("HERMES_DIR")
+    candidates: list[Path] = []
+    if env_override:
+        candidates.append(Path(env_override))
+    candidates += [
+        Path.cwd() / "hermes-agent",
         Path.home() / ".hermes" / "hermes-agent",
         Path.home() / ".config" / "hermes" / "hermes-agent",
+        Path.home() / "AppData" / "Local" / "hermes-agent",
+        Path.home() / "AppData" / "Local" / "Programs" / "hermes" / "hermes-agent",
     ]
     for c in candidates:
         if (c / "run_agent.py").exists():
@@ -114,7 +122,7 @@ def main():
         print("ERROR: Could not find hermes-agent directory.")
         sys.exit(1)
 
-    print(f"Hermes Improvements Uninstaller")
+    print("Hermes Improvements Uninstaller")
     print(f"Target: {hermes_dir}")
     if args.dry_run:
         print("Mode: DRY RUN")

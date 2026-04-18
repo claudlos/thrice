@@ -15,13 +15,12 @@ Usage:
     undo.undo_all()   # Revert all AI commits in session
 """
 
+import logging
 import os
 import subprocess
 import time
-import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Optional, Tuple
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -55,8 +54,8 @@ def _run_git(args: List[str], cwd: str, check: bool = True) -> subprocess.Comple
         if check and result.returncode != 0:
             raise GitError(f"git {' '.join(args)} failed: {result.stderr.strip()}")
         return result
-    except subprocess.TimeoutExpired:
-        raise GitError(f"git {' '.join(args)} timed out")
+    except subprocess.TimeoutExpired as exc:
+        raise GitError(f"git {' '.join(args)} timed out") from exc
 
 
 class GitError(Exception):
@@ -74,12 +73,28 @@ class AutoCommitManager:
     - Never auto-commit to main/master (creates a feature branch)
     """
 
-    def __init__(self, prefix: str = DEFAULT_PREFIX):
+    def __init__(
+        self,
+        prefix: str = DEFAULT_PREFIX,
+        *,
+        scan_for_secrets: bool = True,
+        conventional_messages: bool = True,
+    ):
         self.prefix = prefix
         self.project_dir: Optional[str] = None
         self._enabled = False
         self._session_commits: List[CommitRecord] = []
         self._pending_files: List[Tuple[str, str]] = []  # (file_path, description)
+        # Optional integrations - gracefully no-op if the modules aren't present.
+        self.scan_for_secrets = scan_for_secrets
+        self.conventional_messages = conventional_messages
+        self._last_blocked_findings: list = []
+
+    @property
+    def last_blocked_findings(self) -> list:
+        """Findings from the most recent commit attempt that was blocked by
+        the secret scanner.  Empty list if the last attempt wasn't blocked."""
+        return list(self._last_blocked_findings)
 
     @property
     def enabled(self) -> bool:
@@ -167,8 +182,20 @@ class AutoCommitManager:
             logger.debug("No changes to commit for %s", rel_path)
             return None
 
-        # Commit
-        message = f"{self.prefix} {description}"
+        # Pre-commit secret scan.  If a high/medium-severity finding trips,
+        # unstage and refuse - the agent can then fix and retry.
+        if self.scan_for_secrets and not self._secret_scan_ok():
+            try:
+                _run_git(["reset", rel_path], self.project_dir, check=False)
+            except GitError:
+                pass
+            return None
+
+        # Build the commit message.  If conventional-commits integration is
+        # available and enabled, promote "<prefix> <desc>" to
+        # "<prefix> <type>(<scope>): <desc>".
+        message = self._format_message(description, rel_path)
+
         try:
             _run_git(["commit", "-m", message], self.project_dir)
         except GitError as e:
@@ -232,6 +259,55 @@ class AutoCommitManager:
         """Check if there are unresolved merge conflicts."""
         result = _run_git(["ls-files", "--unmerged"], self.project_dir, check=False)
         return bool(result.stdout.strip())
+
+    # ------------------------------------------------------------------
+    # Optional integrations with secret_scanner + conventional_commit
+    # ------------------------------------------------------------------
+
+    def _secret_scan_ok(self) -> bool:
+        """Run ``secret_scanner.scan_diff`` on the staged changes.  Returns
+        False (and logs a warning) if a high-or-medium-severity finding
+        fires.  If ``secret_scanner`` isn't installed, returns True so the
+        commit proceeds - graceful degradation."""
+        try:
+            from secret_scanner import scan_diff
+        except ImportError:
+            return True
+        cached = _run_git(["diff", "--cached"], self.project_dir, check=False)
+        findings = [
+            f for f in scan_diff(cached.stdout or "")
+            if f.severity in ("high", "medium")
+        ]
+        self._last_blocked_findings = findings
+        if findings:
+            logger.warning(
+                "auto_commit: blocked; %d secret finding(s): %s",
+                len(findings),
+                ", ".join(f"{f.rule} at {f.file}:{f.line}" for f in findings[:3]),
+            )
+            return False
+        return True
+
+    def _format_message(self, description: str, rel_path: str) -> str:
+        """Return the final commit message.  Adds a Conventional-Commits
+        type prefix when ``conventional_commit`` is importable; otherwise
+        falls back to ``<prefix> <description>``."""
+        base = f"{self.prefix} {description}"
+        if not self.conventional_messages:
+            return base
+        try:
+            from conventional_commit import suggest_type
+        except ImportError:
+            return base
+        try:
+            cached = _run_git(["diff", "--cached"], self.project_dir, check=False)
+            ctype = suggest_type(cached.stdout or "", paths=[rel_path])
+        except Exception:
+            return base
+        desc = description.strip().rstrip(".")
+        if desc and desc[0].isupper():
+            desc = desc[0].lower() + desc[1:]
+        return f"{self.prefix} {ctype}: {desc}"
 
 
 class UndoManager:

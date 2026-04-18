@@ -1,15 +1,19 @@
 """Tests for tool_selection_model.py — Probabilistic Tool Selection."""
 
 import os
-import sys
-import tempfile
 import random
+import sys
+
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "new-files"))
 from tool_selection_model import (
-    ToolSelectionLogger, ToolSelectionModel, ToolSelector,
-    _TfIdf, _LogisticClassifier, ToolCallRecord,
+    ToolCallRecord,
+    ToolSelectionLogger,
+    ToolSelectionModel,
+    ToolSelector,
+    _LogisticClassifier,
+    _TfIdf,
 )
 
 # Synthetic data: intent patterns mapped to expected tools

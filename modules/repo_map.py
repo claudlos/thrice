@@ -11,14 +11,11 @@ Uses only stdlib: ast for Python, regex for JS/TS/Go/Rust.
 import ast
 import os
 import re
-import time
 import threading
-import hashlib
+import time
 from collections import defaultdict
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
-
 
 # ---------------------------------------------------------------------------
 # Symbol / File data structures
@@ -519,7 +516,7 @@ class RepoMap:
 
         # Group by file, preserving rank order
         file_symbols: Dict[str, List[Tuple[str, Symbol]]] = defaultdict(list)
-        for fqn, rank in ranked:
+        for fqn, _rank in ranked:
             sym = self.symbols.get(fqn)
             if sym:
                 file_symbols[sym.file_path].append((fqn, sym))

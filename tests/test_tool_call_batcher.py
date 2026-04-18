@@ -5,25 +5,25 @@ Tests for tool_call_batcher.py — Intelligent Tool Call Batching.
 PrefetchPredictor, PrefetchCache, and BatchingAdvisor.
 """
 
-import sys
 import os
+import sys
 import time
+
 import pytest
 
 # Ensure the new-files directory is importable
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "new-files"))
 
 from tool_call_batcher import (
+    BatchingAdvisor,
+    DependencyAnalyzer,
+    DependencyGraph,
+    PrefetchCache,
+    PrefetchPredictor,
     ToolCallRecord,
     ToolCategory,
-    DependencyGraph,
-    DependencyAnalyzer,
-    PrefetchPredictor,
-    PrefetchCache,
-    BatchingAdvisor,
     _categorize,
 )
-
 
 # -----------------------------------------------------------------------
 # Helpers

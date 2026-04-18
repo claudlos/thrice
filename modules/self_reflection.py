@@ -22,8 +22,8 @@ Usage:
 """
 
 from dataclasses import dataclass, field
-from typing import Optional
 from enum import Enum
+from typing import Optional
 
 
 class ReviewSeverity(str, Enum):

@@ -5,9 +5,8 @@ Covers: ErrorCategory, ErrorClassifier, RecoveryEngine, RetryTracker,
         is_same_error, RecoveryStrategy.
 """
 
-import sys
 import os
-import pytest
+import sys
 
 # Allow imports from new-files
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "new-files"))
@@ -20,7 +19,6 @@ from error_recovery import (
     RetryTracker,
     is_same_error,
 )
-
 
 # ─── ErrorCategory Tests ──────────────────────────────────────────────────────
 

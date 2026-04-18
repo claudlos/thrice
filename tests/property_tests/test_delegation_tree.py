@@ -9,16 +9,16 @@ Properties verified:
   INV-D7: Tree Acyclicity
 """
 
-import pytest
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional
 
-from hypothesis import given, settings, HealthCheck, Phase, assume
+import pytest
+from hypothesis import HealthCheck, Phase, given, settings
 from hypothesis import strategies as st
 from hypothesis.stateful import (
     RuleBasedStateMachine,
     invariant,
-    rule,
     precondition,
+    rule,
 )
 
 pytestmark = [pytest.mark.property]
@@ -256,8 +256,9 @@ TestDelegationTreeStateMachine.settings = settings(
 # Standalone property tests
 # ============================================================================
 
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "new-files"))
 
 from hermes_invariants import InvariantChecker

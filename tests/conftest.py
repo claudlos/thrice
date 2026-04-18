@@ -29,7 +29,7 @@ for p in (_PROJECT_ROOT, _THRICE_ROOT, _NEW_FILES):
 # Hypothesis profiles
 # ---------------------------------------------------------------------------
 try:
-    from hypothesis import settings, HealthCheck, Phase, Verbosity
+    from hypothesis import HealthCheck, Phase, Verbosity, settings
 
     # CI profile: fast, fewer examples, skip shrinking
     settings.register_profile(
@@ -79,6 +79,41 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "refinement: abstract/concrete refinement test")
     config.addinivalue_line("markers", "slow: slow test (>5s)")
     config.addinivalue_line("markers", "stateful: hypothesis stateful/RuleBasedStateMachine test")
+    config.addinivalue_line(
+        "markers",
+        "requires_hermes: test needs a live hermes-agent checkout on PYTHONPATH",
+    )
+
+
+def _hermes_available() -> bool:
+    """Return True iff the live hermes-agent package is importable.
+
+    Checks for the real cron.jobs symbols, not the test stub below, so
+    a failed import or a stub-only installation both count as "not
+    available".
+    """
+    import importlib
+    try:
+        mod = importlib.import_module("cron.jobs")
+    except Exception:
+        return False
+    # The stub has JOB_STATES but not the full API (e.g. create_job, get_job).
+    return all(hasattr(mod, name) for name in ("create_job", "get_job"))
+
+
+_HERMES_PRESENT = _hermes_available()
+
+
+def pytest_collection_modifyitems(config, items):
+    """Auto-skip tests marked ``requires_hermes`` when Hermes isn't on PYTHONPATH."""
+    if _HERMES_PRESENT:
+        return
+    skip_no_hermes = pytest.mark.skip(
+        reason="hermes-agent not on PYTHONPATH; skipping requires_hermes tests"
+    )
+    for item in items:
+        if "requires_hermes" in item.keywords:
+            item.add_marker(skip_no_hermes)
 
 
 # ---------------------------------------------------------------------------
