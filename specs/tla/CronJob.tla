@@ -161,10 +161,12 @@ MarkSuccessDone ==
                     removedFlag, staleLock >>
 
 \* mark_failure() : running -> failed
+\* Cap retryCount at (per-job variable) maxRetries + 1 so the RetryBounded
+\* invariant holds even when the same job is triggered / paused / resumed.
 MarkFailure ==
     /\ state = "running"
     /\ state'      = "failed"
-    /\ retryCount' = IF retryCount < MaxRetries + 1
+    /\ retryCount' = IF retryCount < maxRetries + 1
                       THEN retryCount + 1
                       ELSE retryCount
     /\ lastError'  = TRUE
@@ -230,7 +232,7 @@ Recover ==
     /\ state'      = "failed"
     /\ staleLock'  = FALSE
     /\ lastError'  = TRUE
-    /\ retryCount' = IF retryCount < MaxRetries + 1
+    /\ retryCount' = IF retryCount < maxRetries + 1
                       THEN retryCount + 1
                       ELSE retryCount
     /\ UNCHANGED << recurring, repeatTotal, runsCompleted, runsLeft,
