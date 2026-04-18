@@ -51,7 +51,7 @@ class TestToolDispatcher:
         assert result.success
         assert result.result == "hello"
         assert result.tool_name == "echo"
-        assert result.duration > 0
+        assert result.duration >= 0  # Windows time.monotonic has coarse resolution
 
     def test_dispatch_unknown_tool(self):
         result = self.dispatcher.dispatch("nonexistent", {}, {"echo": lambda: ""})

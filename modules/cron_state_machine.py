@@ -77,25 +77,31 @@ def _guard_tick(current: str, action: str, ctx: Dict[str, Any]) -> bool:
 
 
 def _guard_mark_success_recurring(current: str, action: str, ctx: Dict[str, Any]) -> bool:
-    """Guard for mark_success -> scheduled: must be recurring with runs left."""
+    """Guard for mark_success -> scheduled: recurring with strictly more than
+    one run left (this run plus at least one more).  Matches TLA+
+    ``MarkSuccessRecurring`` precondition ``runsLeft > 1``; keeps the
+    ``RepeatConsistency`` invariant by routing the final bounded run through
+    ``mark_success_completed`` instead of a scheduled-but-exhausted state."""
     recurring = ctx.get("recurring", False)
     runs_left = ctx.get("runs_left")
 
     if not recurring:
         return False
-    if runs_left is not None and runs_left <= 0:
+    if runs_left is not None and runs_left <= 1:
         return False
     return True
 
 
 def _guard_mark_success_completed(current: str, action: str, ctx: Dict[str, Any]) -> bool:
-    """Guard for mark_success -> completed: one-shot or no runs left."""
+    """Guard for mark_success -> completed: one-shot, or the last run of a
+    bounded recurring schedule.  Matches TLA+ ``MarkSuccessDone`` precondition
+    ``~recurring \\/ runsLeft <= 1``."""
     recurring = ctx.get("recurring", False)
     runs_left = ctx.get("runs_left")
 
     if not recurring:
         return True
-    if runs_left is not None and runs_left <= 0:
+    if runs_left is not None and runs_left <= 1:
         return True
     return False
 
@@ -364,7 +370,7 @@ class CronJobStateMachine:
         recurring = self._sm.context.get("recurring", False)
         runs_left = self._sm.context.get("runs_left")
         will_complete = (not recurring) or (
-            runs_left is not None and runs_left <= 0
+            runs_left is not None and runs_left <= 1
         )
 
         # Atomically stage the target next_run_at before the transition

@@ -131,11 +131,11 @@ Tick ==
                     retryCount, maxRetries, enabled, removedFlag,
                     staleLock, lastError >>
 
-\* mark_success() : running -> scheduled  (recurring with runs_left > 0)
+\* mark_success() : running -> scheduled  (recurring with at least one more run left after this one)
 MarkSuccessRecurring ==
     /\ state = "running"
     /\ recurring
-    /\ runsLeft > 0
+    /\ runsLeft > 1             \* strict: this run + at least one more
     /\ state'          = "scheduled"
     /\ runsCompleted'  = runsCompleted + 1
     /\ runsLeft'       = runsLeft - 1
@@ -145,10 +145,11 @@ MarkSuccessRecurring ==
     /\ UNCHANGED << recurring, repeatTotal, maxRetries, enabled,
                     tickPending, removedFlag, staleLock >>
 
-\* mark_success() : running -> completed  (one-shot or runs exhausted)
+\* mark_success() : running -> completed  (one-shot, or final bounded run).
+\* Fires when the job either is not recurring, or this run exhausts the budget.
 MarkSuccessDone ==
     /\ state = "running"
-    /\ (~recurring \/ runsLeft = 0)
+    /\ (~recurring \/ runsLeft <= 1)
     /\ state'          = "completed"
     /\ runsCompleted'  = runsCompleted + 1
     /\ runsLeft'       = 0

@@ -371,7 +371,7 @@ def main():
 
     skip_patches = args.skip_patches or args.modules_only
 
-    print(f"Hermes Improvements Installer")
+    print("Hermes Improvements Installer")
     print(f"Target: {hermes_dir}")
     if args.dry_run:
         print("Mode: DRY RUN")

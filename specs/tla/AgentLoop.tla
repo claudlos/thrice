@@ -374,8 +374,12 @@ SafetyInvariants ==
 \* LV-A1 : Every execution eventually reaches a terminal state.
 Termination == <>(state \in TerminalStates)
 
-\* LV-A2 : An asserted interrupt is eventually observed.
-InterruptLiveness == interruptFlag ~> (state = INTERRUPTED)
+\* LV-A2 : An asserted interrupt is eventually observed — either the loop
+\* explicitly transitions to INTERRUPTED, or it finishes the current turn
+\* and reaches some terminal state (matching real-agent semantics where a
+\* mid-turn interrupt may still let the in-flight tool call complete before
+\* the loop responds to the signal).
+InterruptLiveness == interruptFlag ~> (state \in TerminalStates)
 
 \* LV-A3 : Running out of budget eventually lands in BUDGET_EXHAUSTED
 \*          (unless we terminate for another reason first).

@@ -9,7 +9,15 @@ import tempfile
 import textwrap
 import time
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
+
+
+@contextmanager
+def _tempdir():
+    """Temp dir whose path is resolved (Windows 8.3 → long form, macOS /var → /private/var)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        yield os.path.realpath(tmp)
 
 # Ensure the module is importable
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "new-files"))
@@ -32,34 +40,34 @@ class TestFindProjectRoot(unittest.TestCase):
     """Tests for find_project_root()."""
 
     def test_finds_git_dir(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             os.makedirs(os.path.join(tmp, ".git"))
             self.assertEqual(find_project_root(tmp), tmp)
 
     def test_finds_pyproject(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             Path(tmp, "pyproject.toml").touch()
             self.assertEqual(find_project_root(tmp), tmp)
 
     def test_finds_package_json(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             Path(tmp, "package.json").touch()
             self.assertEqual(find_project_root(tmp), tmp)
 
     def test_finds_cargo_toml(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             Path(tmp, "Cargo.toml").touch()
             self.assertEqual(find_project_root(tmp), tmp)
 
     def test_walks_up_directories(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             os.makedirs(os.path.join(tmp, ".git"))
             subdir = os.path.join(tmp, "src", "deep", "nested")
             os.makedirs(subdir)
             self.assertEqual(find_project_root(subdir), tmp)
 
     def test_returns_none_for_no_markers(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             # Isolated dir with no markers — should eventually hit root and return None
             # We need a dir that has no markers all the way up, which is hard to guarantee.
             # Instead, just check it returns a string or None (it might find system-level markers).
@@ -68,7 +76,7 @@ class TestFindProjectRoot(unittest.TestCase):
             self.assertTrue(result is None or isinstance(result, str))
 
     def test_go_mod(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             Path(tmp, "go.mod").touch()
             self.assertEqual(find_project_root(tmp), tmp)
 
@@ -149,14 +157,14 @@ class TestDetectProjectType(unittest.TestCase):
     """Tests for detect_project_type()."""
 
     def test_python_project(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             Path(tmp, "pyproject.toml").write_text("[tool.poetry]\n", encoding="utf-8")
             info = detect_project_type(tmp)
             self.assertEqual(info["language"], "python")
             self.assertEqual(info["package_manager"], "poetry")
 
     def test_python_with_pytest(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             Path(tmp, "setup.py").touch()
             Path(tmp, "conftest.py").touch()
             info = detect_project_type(tmp)
@@ -164,46 +172,46 @@ class TestDetectProjectType(unittest.TestCase):
             self.assertEqual(info["test_framework"], "pytest")
 
     def test_javascript_project(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             Path(tmp, "package.json").write_text('{"name":"test"}', encoding="utf-8")
             info = detect_project_type(tmp)
             self.assertEqual(info["language"], "javascript")
             self.assertEqual(info["package_manager"], "npm")
 
     def test_typescript_project(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             Path(tmp, "package.json").write_text('{"name":"test"}', encoding="utf-8")
             Path(tmp, "tsconfig.json").touch()
             info = detect_project_type(tmp)
             self.assertEqual(info["language"], "typescript")
 
     def test_yarn_detected(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             Path(tmp, "package.json").write_text('{}', encoding="utf-8")
             Path(tmp, "yarn.lock").touch()
             info = detect_project_type(tmp)
             self.assertEqual(info["package_manager"], "yarn")
 
     def test_rust_project(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             Path(tmp, "Cargo.toml").touch()
             info = detect_project_type(tmp)
             self.assertEqual(info["language"], "rust")
             self.assertEqual(info["build_tool"], "cargo")
 
     def test_go_project(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             Path(tmp, "go.mod").touch()
             info = detect_project_type(tmp)
             self.assertEqual(info["language"], "go")
 
     def test_unknown_project(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             info = detect_project_type(tmp)
             self.assertIsNone(info["language"])
 
     def test_jest_detected(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             Path(tmp, "package.json").write_text('{"devDependencies":{"jest":"^29"}}', encoding="utf-8")
             info = detect_project_type(tmp)
             self.assertEqual(info["test_framework"], "jest")
@@ -220,7 +228,7 @@ class TestProjectMemory(unittest.TestCase):
         return hermes
 
     def test_load_hermes_dir_memory(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             hermes = self._make_project(tmp)
             Path(hermes, MEMORY_FILENAME).write_text(
                 "## Conventions\n\n- Use ruff\n", encoding="utf-8"
@@ -230,7 +238,7 @@ class TestProjectMemory(unittest.TestCase):
             self.assertIn("ruff", mem.sections["Conventions"])
 
     def test_load_hermes_md_root(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             os.makedirs(os.path.join(tmp, ".git"))
             Path(tmp, HERMES_ROOT_FILE).write_text(
                 "## Notes\n\nImportant note.\n", encoding="utf-8"
@@ -239,7 +247,7 @@ class TestProjectMemory(unittest.TestCase):
             self.assertIn("Notes", mem.list_sections())
 
     def test_merge_both_files(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             hermes = self._make_project(tmp)
             Path(hermes, MEMORY_FILENAME).write_text(
                 "## Conventions\n\n- From hermes dir\n", encoding="utf-8"
@@ -253,13 +261,13 @@ class TestProjectMemory(unittest.TestCase):
             self.assertIn("From root file", ctx)
 
     def test_get_context_empty_project(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             os.makedirs(os.path.join(tmp, ".git"))
             mem = ProjectMemory(project_root=tmp)
             self.assertEqual(mem.get_context(), "")
 
     def test_get_context_with_subdirectory(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             hermes = self._make_project(tmp)
             Path(hermes, MEMORY_FILENAME).write_text(
                 "## Conventions\n\n- Root conventions\n", encoding="utf-8"
@@ -277,7 +285,7 @@ class TestProjectMemory(unittest.TestCase):
             self.assertIn("API conventions", ctx)
 
     def test_update_creates_file(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             os.makedirs(os.path.join(tmp, ".git"))
             mem = ProjectMemory(project_root=tmp)
             mem.update("Commands", "- make build")
@@ -287,7 +295,7 @@ class TestProjectMemory(unittest.TestCase):
             self.assertIn("make build", on_disk)
 
     def test_update_preserves_other_sections(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             hermes = self._make_project(tmp)
             Path(hermes, MEMORY_FILENAME).write_text(
                 "## Conventions\n\n- Existing\n\n## Notes\n\nOld note.\n",
@@ -300,7 +308,7 @@ class TestProjectMemory(unittest.TestCase):
             self.assertIn("New note.", on_disk)
 
     def test_is_loaded_property(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             hermes = self._make_project(tmp)
             Path(hermes, MEMORY_FILENAME).write_text("## Notes\n\nhello\n", encoding="utf-8")
             mem = ProjectMemory(project_root=tmp)
@@ -328,14 +336,14 @@ class TestProjectMemoryManager(unittest.TestCase):
         return hermes
 
     def test_get_memory_returns_instance(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             self._make_project(tmp)
             mgr = ProjectMemoryManager()
             mem = mgr.get_memory(cwd=tmp)
             self.assertIsInstance(mem, ProjectMemory)
 
     def test_caching(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             hermes = self._make_project(tmp)
             Path(hermes, MEMORY_FILENAME).write_text("## Notes\n\ncached\n", encoding="utf-8")
             mgr = ProjectMemoryManager(cache_ttl=60.0)
@@ -344,7 +352,7 @@ class TestProjectMemoryManager(unittest.TestCase):
             self.assertIs(mem1, mem2)
 
     def test_invalidate_clears_cache(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             hermes = self._make_project(tmp)
             Path(hermes, MEMORY_FILENAME).write_text("## Notes\n\nv1\n", encoding="utf-8")
             mgr = ProjectMemoryManager()
@@ -354,7 +362,7 @@ class TestProjectMemoryManager(unittest.TestCase):
             self.assertIsNot(mem1, mem2)
 
     def test_invalidate_specific_root(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             hermes = self._make_project(tmp)
             Path(hermes, MEMORY_FILENAME).write_text("## Notes\n\nhi\n", encoding="utf-8")
             mgr = ProjectMemoryManager()
@@ -364,7 +372,7 @@ class TestProjectMemoryManager(unittest.TestCase):
             self.assertNotIn(tmp, mgr.cached_roots)
 
     def test_format_for_prompt(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             hermes = self._make_project(tmp)
             Path(hermes, MEMORY_FILENAME).write_text(
                 "## Conventions\n\n- Use type hints\n", encoding="utf-8"
@@ -376,14 +384,14 @@ class TestProjectMemoryManager(unittest.TestCase):
             self.assertIn("type hints", prompt)
 
     def test_format_for_prompt_empty(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             os.makedirs(os.path.join(tmp, ".git"))
             mgr = ProjectMemoryManager()
             prompt = mgr.format_for_prompt(cwd=tmp)
             self.assertEqual(prompt, "")
 
     def test_generate_initial_memory_python(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             Path(tmp, "pyproject.toml").write_text(
                 "[tool.pytest]\n", encoding="utf-8"
             )
@@ -397,7 +405,7 @@ class TestProjectMemoryManager(unittest.TestCase):
             self.assertIn("src/", md)
 
     def test_generate_initial_memory_js(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             Path(tmp, "package.json").write_text(
                 '{"devDependencies":{"jest":"^29"}}', encoding="utf-8"
             )
@@ -407,7 +415,7 @@ class TestProjectMemoryManager(unittest.TestCase):
             self.assertIn("jest", md.lower())
 
     def test_generate_and_save(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             Path(tmp, "Cargo.toml").touch()
             mgr = ProjectMemoryManager()
             md = mgr.generate_and_save(tmp)
@@ -418,7 +426,7 @@ class TestProjectMemoryManager(unittest.TestCase):
             self.assertIn("rust", md.lower())
 
     def test_mtime_invalidation(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             hermes = self._make_project(tmp)
             mem_file = Path(hermes, MEMORY_FILENAME)
             mem_file.write_text("## Notes\n\nversion1\n", encoding="utf-8")
@@ -448,7 +456,7 @@ class TestEdgeCases(unittest.TestCase):
         self.assertIn("My Section (v2)", parsed)
 
     def test_multiple_levels_of_subdirs(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             os.makedirs(os.path.join(tmp, ".git"))
             hermes = os.path.join(tmp, HERMES_DIR)
             os.makedirs(hermes)
@@ -487,7 +495,7 @@ class TestEdgeCases(unittest.TestCase):
             self.assertEqual(parsed[s], f"Content for {s}")
 
     def test_auto_detect_from_cwd(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             os.makedirs(os.path.join(tmp, ".git"))
             hermes = os.path.join(tmp, HERMES_DIR)
             os.makedirs(hermes)

@@ -80,7 +80,9 @@ def _parse_python(source: str, file_path: str) -> FileInfo:
     info = FileInfo(path=file_path, language="python")
     try:
         tree = ast.parse(source, filename=file_path)
-    except SyntaxError:
+    except (SyntaxError, ValueError):
+        # ValueError covers sources with null bytes (binary-like content);
+        # SyntaxError covers ill-formed Python.
         return info
 
     for node in ast.walk(tree):
