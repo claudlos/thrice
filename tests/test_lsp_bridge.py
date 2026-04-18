@@ -76,6 +76,16 @@ _FAKE_SERVER_SRC = textwrap.dedent(r'''
     """Tiny fake LSP server for lsp_bridge tests."""
     import json, sys, os, re
 
+    # Record client-facing events so tests can assert on them.  The log
+    # file path is pulled from LSP_FAKE_LOG in the process env.
+    _LOG = os.environ.get("LSP_FAKE_LOG")
+
+    def _log(entry):
+        if not _LOG:
+            return
+        with open(_LOG, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry) + "\n")
+
     def read_frame():
         headers = {}
         while True:
@@ -108,7 +118,19 @@ _FAKE_SERVER_SRC = textwrap.dedent(r'''
         elif method == "initialized":
             pass
         elif method == "textDocument/didOpen":
-            pass
+            td = msg.get("params", {}).get("textDocument", {})
+            _log({"event": "didOpen",
+                  "uri": td.get("uri"),
+                  "version": td.get("version"),
+                  "text": td.get("text")})
+        elif method == "textDocument/didChange":
+            td = msg.get("params", {}).get("textDocument", {})
+            changes = msg.get("params", {}).get("contentChanges", [])
+            text = changes[0].get("text") if changes else None
+            _log({"event": "didChange",
+                  "uri": td.get("uri"),
+                  "version": td.get("version"),
+                  "text": text})
         elif method == "textDocument/definition":
             uri = msg["params"]["textDocument"]["uri"]
             write({"jsonrpc": "2.0", "id": mid, "result": [{
@@ -241,3 +263,89 @@ class TestLocationHelpers:
         loc = Location(uri=_path_to_uri(str(p)),
                        start_line=0, start_char=0, end_line=1, end_char=2)
         assert os.path.normpath(loc.path) == os.path.normpath(str(p))
+
+
+# ---------------------------------------------------------------------------
+# File-sync regression tests for _sync_file (P1 fix).
+#
+# The fake server records didOpen / didChange notifications to a log file
+# when LSP_FAKE_LOG is set in its environment.  Because start() forks the
+# server process directly, we install the log path on os.environ for the
+# duration of these tests.
+# ---------------------------------------------------------------------------
+
+import json as _json
+
+
+def _read_log(path):
+    if not os.path.exists(path):
+        return []
+    out = []
+    with open(path, "r", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if line:
+                out.append(_json.loads(line))
+    return out
+
+
+@pytest.fixture
+def logged_bridge(fake_server, tmp_path, monkeypatch):
+    log_path = tmp_path / "lsp_events.log"
+    monkeypatch.setenv("LSP_FAKE_LOG", str(log_path))
+    target = tmp_path / "foo.py"
+    target.write_text("def hello():\n    return 1\n")
+    bridge = LspBridge(fake_server, root=str(tmp_path),
+                       init_timeout=5.0, request_timeout=5.0)
+    bridge.start()
+    try:
+        yield bridge, target, log_path
+    finally:
+        bridge.shutdown()
+
+
+class TestSyncFile:
+    def test_first_query_sends_did_open(self, logged_bridge):
+        bridge, target, log_path = logged_bridge
+        bridge.definition(str(target), line=0, character=4)
+        events = _read_log(str(log_path))
+        opens = [e for e in events if e["event"] == "didOpen"]
+        assert len(opens) == 1
+        assert opens[0]["version"] == 1
+        assert "def hello" in opens[0]["text"]
+
+    def test_repeat_query_without_edit_does_not_resend(self, logged_bridge):
+        bridge, target, log_path = logged_bridge
+        bridge.definition(str(target), line=0, character=4)
+        bridge.definition(str(target), line=0, character=4)
+        events = _read_log(str(log_path))
+        assert sum(1 for e in events if e["event"] == "didOpen") == 1
+        assert sum(1 for e in events if e["event"] == "didChange") == 0
+
+    def test_edit_triggers_did_change_with_bumped_version(self, logged_bridge):
+        bridge, target, log_path = logged_bridge
+        bridge.definition(str(target), line=0, character=4)
+        target.write_text("def hello():\n    return 2  # edited\n")
+        bridge.definition(str(target), line=0, character=4)
+        events = _read_log(str(log_path))
+        changes = [e for e in events if e["event"] == "didChange"]
+        assert len(changes) == 1
+        assert changes[0]["version"] == 2
+        assert "return 2" in changes[0]["text"]
+
+    def test_rename_sends_current_contents(self, logged_bridge):
+        bridge, target, log_path = logged_bridge
+        bridge.definition(str(target), line=0, character=4)
+        target.write_text("def goodbye():\n    return 3\n")
+        bridge.rename(str(target), line=0, character=4, new_name="howdy")
+        events = _read_log(str(log_path))
+        changes = [e for e in events if e["event"] == "didChange"]
+        assert changes, "rename after edit must sync current contents"
+        assert "goodbye" in changes[-1]["text"]
+
+    def test_shutdown_clears_open_file_state(self, logged_bridge):
+        bridge, target, _log_path = logged_bridge
+        bridge.definition(str(target), line=0, character=4)
+        assert bridge._open_files
+        bridge.shutdown()
+        assert bridge._open_files == {}

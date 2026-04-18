@@ -34,6 +34,7 @@ wrap an instance per worker.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -167,7 +168,10 @@ class LspBridge:
         self._reader_thread: Optional[threading.Thread] = None
         self._stderr_thread: Optional[threading.Thread] = None
         self._stopped = False
-        self._open_files: Dict[str, int] = {}
+        # abs_path -> (version, sha256 of last synced text).  Tracks the
+        # contents the server has actually seen so _sync_file can decide
+        # whether to fire didOpen, didChange, or no-op.
+        self._open_files: Dict[str, Tuple[int, str]] = {}
 
     # -- Named constructors ----------------------------------------------
 
@@ -244,6 +248,8 @@ class LspBridge:
             if self._proc.poll() is None:
                 self._proc.kill()
         self._proc = None
+        # Clear tracked open-file state so a reused bridge starts clean.
+        self._open_files.clear()
 
     def __enter__(self):
         self.start()
@@ -257,7 +263,7 @@ class LspBridge:
 
     def definition(self, file: str, line: int, character: int) -> List[Location]:
         """``textDocument/definition`` - returns a list (may be empty)."""
-        self._open_if_needed(file)
+        self._sync_file(file)
         params = self._text_doc_position(file, line, character)
         result = self._call("textDocument/definition", params) or []
         return [_loc_from_lsp(r) for r in _as_list(result)]
@@ -265,7 +271,7 @@ class LspBridge:
     def references(self, file: str, line: int, character: int,
                    include_decl: bool = True) -> List[Location]:
         """``textDocument/references`` - returns all call sites."""
-        self._open_if_needed(file)
+        self._sync_file(file)
         params = self._text_doc_position(file, line, character)
         params["context"] = {"includeDeclaration": include_decl}
         result = self._call("textDocument/references", params) or []
@@ -273,7 +279,7 @@ class LspBridge:
 
     def hover(self, file: str, line: int, character: int) -> Optional[str]:
         """``textDocument/hover`` - returns the plaintext contents or None."""
-        self._open_if_needed(file)
+        self._sync_file(file)
         params = self._text_doc_position(file, line, character)
         result = self._call("textDocument/hover", params)
         if not result:
@@ -295,7 +301,7 @@ class LspBridge:
 
     def document_symbols(self, file: str) -> List[SymbolInfo]:
         """``textDocument/documentSymbol`` - top-level + class members."""
-        self._open_if_needed(file)
+        self._sync_file(file)
         params = {"textDocument": {"uri": _path_to_uri(file)}}
         result = self._call("textDocument/documentSymbol", params) or []
         return [_symbol_from_lsp(s, file) for s in _as_list(result)]
@@ -312,7 +318,7 @@ class LspBridge:
         Each edit is a tuple ``(start_line, start_char, end_line, end_char,
         new_text)``.  The client is responsible for applying them.
         """
-        self._open_if_needed(file)
+        self._sync_file(file)
         params = self._text_doc_position(file, line, character)
         params["newName"] = new_name
         result = self._call("textDocument/rename", params)
@@ -420,26 +426,55 @@ class LspBridge:
             "position":     {"line": line, "character": character},
         }
 
-    def _open_if_needed(self, file: str) -> None:
-        """Send ``textDocument/didOpen`` once per file (LSP expects this
-        before ``definition`` / ``references`` queries)."""
+    def _sync_file(self, file: str) -> None:
+        """Synchronise ``file``'s on-disk contents with the LSP server.
+
+        - First visit: send ``textDocument/didOpen`` with version 1.
+        - Content changed since last sync: bump the version and send
+          ``textDocument/didChange`` with a full-document replacement.
+        - Content unchanged: no-op.
+
+        Using a content hash instead of mtime-or-marker semantics keeps
+        the bridge correct across tools that touch files without changing
+        bytes, and across filesystems with coarse mtime resolution.
+        """
         abs_path = os.path.abspath(file)
-        if abs_path in self._open_files:
-            return
         try:
             with open(abs_path, "r", encoding="utf-8", errors="replace") as fh:
                 text = fh.read()
         except OSError as exc:
             raise LspError(code=-1, message=f"open failed: {exc!s}") from exc
-        version = 1
-        self._open_files[abs_path] = version
-        self._notify("textDocument/didOpen", {
+
+        digest = hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()
+        previous = self._open_files.get(abs_path)
+
+        if previous is None:
+            version = 1
+            self._open_files[abs_path] = (version, digest)
+            self._notify("textDocument/didOpen", {
+                "textDocument": {
+                    "uri": _path_to_uri(abs_path),
+                    "languageId": self.language_id,
+                    "version": version,
+                    "text": text,
+                },
+            })
+            return
+
+        prev_version, prev_digest = previous
+        if prev_digest == digest:
+            return
+
+        version = prev_version + 1
+        self._open_files[abs_path] = (version, digest)
+        self._notify("textDocument/didChange", {
             "textDocument": {
                 "uri": _path_to_uri(abs_path),
-                "languageId": self.language_id,
                 "version": version,
-                "text": text,
             },
+            # Full-document sync; we don't negotiate incremental sync
+            # capabilities, so we always replace the whole buffer.
+            "contentChanges": [{"text": text}],
         })
 
 
