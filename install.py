@@ -79,6 +79,18 @@ STANDALONE_MODULES = [
     "silent_error_audit.py",
     # SM-1 concrete state machine (paired with specs/tla/CronJob.tla)
     "cron_state_machine.py",
+    # Wave 3: build & regression tooling
+    "build_loop.py",
+    "regression_bisector.py",
+    # Wave 4: coding-quality gates
+    "conventional_commit.py",
+    "secret_scanner.py",
+    "doctest_runner.py",
+    "diff_preview.py",
+    "semantic_diff.py",
+    "trace_capture.py",
+    "cost_estimator.py",
+    "lsp_bridge.py",
     # Nested modules
     "agent/skill_index_cache.py",
 ]
