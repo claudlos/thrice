@@ -9,15 +9,16 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/modules-38-blue" alt="38 modules">
-  <img src="https://img.shields.io/badge/tests-1351-green" alt="1351 tests">
+  <img src="https://img.shields.io/badge/modules-52-blue" alt="52 modules">
+  <img src="https://img.shields.io/badge/tests-1456_passing-green" alt="1456 passing without Hermes; 7 skipped until Hermes is installed">
   <img src="https://img.shields.io/badge/patches-15-orange" alt="15 patches">
   <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python 3.10+">
+  <img src="https://github.com/claudlos/thrice/actions/workflows/tla.yml/badge.svg" alt="TLA+ verified">
 </p>
 
 ---
 
-**Thrice** is a drop-in improvement suite for [Hermes Agent](https://github.com/NousResearch/hermes-agent). It adds 38 standalone Python modules covering smarter tool use, better context management, formal state machine hardening, multi-agent coordination, and research-grade features — all with graceful fallbacks. Delete any module file and Hermes instantly reverts to its original behavior.
+**Thrice** is a drop-in improvement suite for [Hermes Agent](https://github.com/NousResearch/hermes-agent). It adds 52 standalone Python modules covering smarter tool use, better context management, formal state machine hardening, multi-agent coordination, and research-grade features — all with graceful fallbacks. Delete any module file and Hermes instantly reverts to its original behavior.
 
 ## Quick Start
 
@@ -60,6 +61,8 @@ python3 install.py --modules-only
 |--------|-------------|
 | `reproduce_first.py` | Reproduce-before-fix debugging — confirms the bug before patching |
 | `test_fix_loop.py` | Iterative test-fix loop with multi-language parsers (pytest, jest, cargo, go) |
+| `build_loop.py` | Structured build diagnostics for cargo / go / tsc / gcc / py_compile |
+| `regression_bisector.py` | Scripted `git bisect` with step + total timeouts (SM-3 in TLA+) |
 | `context_gatherer.py` | Smart context gathering — reads imports, tests, and reverse deps before editing |
 | `edit_format.py` | Selects optimal edit format per file size and change scope |
 | `error_recovery.py` | Classifies errors and applies graduated recovery strategies |
@@ -69,6 +72,31 @@ python3 install.py --modules-only
 | `conversation_checkpoint.py` | Save and restore conversation state for long tasks |
 | `agent_loop_components.py` | Modular agent loop: ToolDispatcher, RetryEngine, CostTracker |
 | `silent_error_audit.py` | Detects silent error swallowing + module health dashboard |
+
+### Coding Quality Gates
+
+| Module | What it does |
+|--------|-------------|
+| `diff_preview.py` | Syntax-validate a proposed edit (Python / JSON / YAML / TOML / generic) before it hits disk |
+| `semantic_diff.py` | AST-level diff for Python — ignores whitespace, comments, import reorder; detects renames / signature / body / decorator changes |
+| `trace_capture.py` | Capture stack + redacted local variables on test failures for the agent's next turn |
+| `doctest_runner.py` | Run docstring examples project-wide with structured failure records |
+| `secret_scanner.py` | Regex + entropy pre-commit scan; flags AWS / GitHub / OpenAI / Anthropic / JWT / PEM / password literals |
+| `conventional_commit.py` | Validate + auto-generate Conventional-Commits messages from a diff |
+| `cost_estimator.py` | Predict p50 / p95 token / iteration / wall-clock cost from historical telemetry |
+| `lsp_bridge.py` | Stdio JSON-RPC 2.0 LSP client: `definition` · `references` · `hover` · `documentSymbols` · `rename` |
+
+### Context & Cache (research-grounded)
+
+Grounded in the Manus context-engineering blog and *"Don't Break the Cache"*
+(arXiv:2601.06007), which measured 45-80 % cost reduction from correct KV-cache
+preservation in agent loops.
+
+| Module | What it does |
+|--------|-------------|
+| `cache_optimizer.py` | `PrefixGuard` detects cache-invalidating mutations (timestamps, UUIDs, tool-set churn) before a request goes out; `CacheTracker` records per-turn hit rate, estimated $ savings, and flags regressions |
+| `task_scratchpad.py` | Recitation pattern — bounded, revisable todo list that gets re-rendered at the end of every prompt so the objective stays in recent context across 50+ tool-use loops |
+| `subagent_dispatch.py` | Fresh-context delegation primitive with token/time/output caps, canonical `search` / `summarize` / `inspect` patterns, and a pluggable runner so tests don't need a live LLM |
 
 ### Research & Formal Methods
 
@@ -142,13 +170,41 @@ Or just delete any module file — the `try/except ImportError` fallback handles
 ## Development
 
 ```bash
-# Run the test suite
+# Run the module-level test suite (no Hermes required)
 pip install pytest hypothesis
-PYTHONPATH="$HOME/.hermes/hermes-agent:." pytest tests/ -q
+PYTHONPATH=modules pytest tests/ -q \
+    --ignore=tests/test_cron_state_machine.py \
+    --ignore=tests/test_hermes_invariants.py \
+    --ignore=tests/test_integration_smoke.py
+
+# Full suite (requires Hermes on PYTHONPATH)
+PYTHONPATH="$HOME/.hermes/hermes-agent:modules:." pytest tests/ -q
 
 # Syntax check all modules
 for f in modules/*.py modules/agent/*.py; do python3 -m py_compile "$f"; done
+
+# Formal verification (requires Java 11+)
+./specs/tla/run_tlc.sh                 # both specs
+./specs/tla/run_tlc.sh cron            # just SM-1
+./specs/tla/run_tlc.sh agent           # just SM-2
 ```
+
+## Formal specifications
+
+The two core state machines (`cron_state_machine.py`, `agent_loop_state_machine.py`)
+are specified in TLA+ and model-checked by TLC on every push:
+
+| Spec                       | Models                                 |
+|----------------------------|----------------------------------------|
+| [`specs/tla/CronJob.tla`](specs/tla/CronJob.tla)     | SM-1 — cron job lifecycle (7 states, 12 transitions)   |
+| [`specs/tla/AgentLoop.tla`](specs/tla/AgentLoop.tla) | SM-2 — agent request/response loop (11 states, 16 transitions) |
+| [`specs/tla/Bisector.tla`](specs/tla/Bisector.tla)   | SM-3 — regression bisector lifecycle (6 states, 8 transitions) |
+
+See [`specs/tla/README.md`](specs/tla/README.md) for what's checked (invariants +
+liveness properties) and [`specs/REFINEMENT.md`](specs/REFINEMENT.md) for the
+simulation relation between TLA+ actions and Python methods.
+
+TLC runs in CI — see [`.github/workflows/tla.yml`](.github/workflows/tla.yml).
 
 ## How It Works
 
@@ -158,8 +214,12 @@ Thrice follows three principles:
 
 2. **No forking** — Thrice doesn't fork Hermes. It layers improvements on top via standalone modules + surgical patches. When Hermes updates, run `update.py` to re-apply.
 
-3. **Mathematically rigorous** — core state machines have TLA+ specifications, property-based tests (Hypothesis), and runtime invariant checking. The formal specs caught 5 race conditions and proved deadlock freedom.
+3. **Mathematically rigorous** — the two core state machines have full TLA+ specifications (`specs/tla/CronJob.tla`, `specs/tla/AgentLoop.tla`), model-checked by TLC in CI against nine safety invariants and four liveness properties apiece, with property-based tests (Hypothesis) for the Python side. The specs caught two real atomicity bugs in the Python implementation (pre-transition context clear in `mark_success`, pre-guard iteration increment in `build_request`) when they were first wired up.
 
 ## License
 
-Same license as [Hermes Agent](https://github.com/NousResearch/hermes-agent)
+MIT — see [`LICENSE`](LICENSE).
+
+Thrice is a layer on top of [Hermes Agent](https://github.com/NousResearch/hermes-agent)
+but is distributed under its own MIT license.  Hermes itself is licensed
+separately; consult its repository before redistribution.

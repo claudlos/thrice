@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  syntax:
+    name: py_compile · Python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Compile every shipped module
+        run: |
+          python -m py_compile modules/*.py modules/agent/*.py
+          python -m py_compile install.py update.py uninstall.py
+          python -m py_compile specs/tla/_check_coverage.py
+
+  test:
+    name: pytest · Python ${{ matrix.python }} · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[test]"
+      - name: Run tests (Hermes-free subset skips automatically)
+        env:
+          HYPOTHESIS_PROFILE: ci
+        run: |
+          pytest -q --tb=short -p no:warnings
+
+  lint:
+    name: ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install ruff
+        run: pip install ruff
+      - name: Lint modules
+        run: ruff check modules/ install.py update.py uninstall.py
+      - name: Lint tests (non-blocking advisory)
+        run: ruff check tests/ --select=F401,F841,E741,B007 || true
+
+  installer-dryrun:
+    name: install.py --dry-run sanity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Create fake hermes-agent tree
+        run: |
+          mkdir -p /tmp/fake-hermes/agent
+          mkdir -p /tmp/fake-hermes/cron
+          mkdir -p /tmp/fake-hermes/tools
+          mkdir -p /tmp/fake-hermes/gateway
+          mkdir -p /tmp/fake-hermes/tests/tools
+          : > /tmp/fake-hermes/run_agent.py
+          : > /tmp/fake-hermes/agent/context_compressor.py
+          : > /tmp/fake-hermes/agent/prompt_builder.py
+          : > /tmp/fake-hermes/cron/__init__.py
+          : > /tmp/fake-hermes/cron/jobs.py
+          : > /tmp/fake-hermes/cron/scheduler.py
+          : > /tmp/fake-hermes/gateway/session.py
+          : > /tmp/fake-hermes/gateway/stream_consumer.py
+          : > /tmp/fake-hermes/tools/cronjob_tools.py
+          : > /tmp/fake-hermes/tools/delegate_tool.py
+          : > /tmp/fake-hermes/tools/file_tools.py
+          : > /tmp/fake-hermes/tools/fuzzy_match.py
+          : > /tmp/fake-hermes/tools/process_registry.py
+          : > /tmp/fake-hermes/tools/skills_tool.py
+          : > /tmp/fake-hermes/tests/tools/test_delegate.py
+      - name: Dry-run install
+        run: python install.py --hermes-dir /tmp/fake-hermes --dry-run
+      - name: Dry-run modules-only install
+        run: python install.py --hermes-dir /tmp/fake-hermes --dry-run --modules-only

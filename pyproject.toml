@@ -1,0 +1,76 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "thrice"
+version = "0.2.0"
+description = "Drop-in improvement suite for the Hermes AI Agent - 52 modules, 3 TLA+ specs, formally verified"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "claudlos" }]
+keywords = ["hermes", "ai-agent", "state-machine", "tla-plus", "formal-methods"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+# Runtime dependencies: the modules themselves only use the stdlib.
+# Integration with a live Hermes install is the user's responsibility.
+dependencies = []
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7",
+    "hypothesis>=6",
+]
+dev = [
+    "pytest>=7",
+    "hypothesis>=6",
+    "ruff>=0.5",
+]
+
+[project.urls]
+Homepage      = "https://github.com/claudlos/thrice"
+Documentation = "https://github.com/claudlos/thrice#readme"
+Issues        = "https://github.com/claudlos/thrice/issues"
+Changelog     = "https://github.com/claudlos/thrice/blob/main/CHANGELOG.md"
+
+# The package maps to the modules/ directory.  Thrice is primarily a
+# collection of standalone files that the installer drops into an
+# existing Hermes tree, so pip-installing is a secondary use-case.
+[tool.setuptools]
+package-dir = { "" = "modules" }
+
+[tool.setuptools.packages.find]
+where = ["modules"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["modules", "."]
+markers = [
+    "property: property-based test (hypothesis)",
+    "invariant: invariant checker unit test",
+    "refinement: abstract/concrete refinement test",
+    "requires_hermes: test requires a live hermes-agent install on PYTHONPATH",
+    "slow: slow test (>5s)",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = ["specs/tla", ".hermes-improvements-backup"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "I"]
+ignore = ["E501"]  # line length handled by formatter
