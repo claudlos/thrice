@@ -96,6 +96,9 @@ class TestBudgetCaps:
             r = d.run(SubTask(
                 kind="test",
                 prompt="hi",
+                # raise token cap well above the estimated output so this
+                # test exercises character truncation, not token budgeting
+                max_output_tokens=10_000,
                 truncate_output_chars=500,
             ))
         assert r.ok
@@ -204,3 +207,114 @@ class TestCostIntegration:
         recs = est._load()
         assert len(recs) == 1
         assert recs[0].tokens == r.cost_tokens
+
+
+# ---------------------------------------------------------------------------
+# Timeout isolation (P2): a runaway task does not starve later work.
+# ---------------------------------------------------------------------------
+
+class TestTimeoutIsolation:
+    def test_timed_out_task_does_not_block_subsequent_fast_task(self):
+        """A task that overruns must not hold the isolated executor open
+        long enough to delay the next ``run``."""
+        import threading
+
+        def slow_runner(task):
+            # Flag flips if the task is ever allowed to complete.
+            slow_runner.finished_flag.set()
+            time.sleep(1.5)
+            return "slow done", 1, 1
+
+        slow_runner.finished_flag = threading.Event()
+
+        def fast_runner(task):
+            return "fast done", 1, 1
+
+        # First, run a slow runner that will time out immediately.
+        with SubagentDispatcher(slow_runner) as d:
+            r_slow = d.run(SubTask(kind="test", prompt="hi", timeout_s=0.05))
+            assert not r_slow.ok
+            assert r_slow.error and "timed out" in r_slow.error
+
+        # The second dispatcher with a completely different runner must
+        # not see any lingering delay.  If the timeout leaked into a
+        # shared pool, this would be visibly slower.
+        t0 = time.monotonic()
+        with SubagentDispatcher(fast_runner) as d:
+            r_fast = d.run(SubTask(kind="test", prompt="go", timeout_s=1.0))
+        elapsed = time.monotonic() - t0
+        assert r_fast.ok
+        assert r_fast.summary == "fast done"
+        assert elapsed < 1.0, f"fast task blocked by leaked worker: {elapsed:.2f}s"
+
+    def test_multiple_timeouts_do_not_starve_pool(self):
+        """Three consecutive timeouts followed by a fast task — the fast
+        task completes promptly because each timeout uses its own isolated
+        executor."""
+        def slow_runner(task):
+            time.sleep(2.0)
+            return "unreachable", 1, 1
+
+        def fast_runner(task):
+            return "ok", 1, 1
+
+        with SubagentDispatcher(slow_runner) as d:
+            for _ in range(3):
+                r = d.run(SubTask(kind="test", prompt="x", timeout_s=0.05))
+                assert not r.ok
+
+        t0 = time.monotonic()
+        with SubagentDispatcher(fast_runner) as d:
+            r = d.run(SubTask(kind="test", prompt="y", timeout_s=1.0))
+        elapsed = time.monotonic() - t0
+        assert r.ok
+        assert elapsed < 1.0
+
+
+# ---------------------------------------------------------------------------
+# Output-token cap (P3): max_output_tokens is a real guardrail.
+# ---------------------------------------------------------------------------
+
+class TestOutputTokenCap:
+    def test_output_token_cap_rejects_oversized_output(self):
+        # 4000 chars ~= 1000 tokens with the 4-char-per-token estimator.
+        big = "z" * 4000
+        runner = as_runner(lambda t: big)
+        with SubagentDispatcher(runner) as d:
+            r = d.run(SubTask(
+                kind="test",
+                prompt="hi",
+                max_output_tokens=100,
+                truncate_output_chars=20_000,  # NOT the limiter under test
+            ))
+        assert not r.ok
+        assert r.error and "output tokens" in r.error
+        assert "exceeds cap" in r.error
+
+    def test_output_token_cap_distinct_from_char_truncation(self):
+        """max_output_tokens and truncate_output_chars are independent
+        guardrails.  Output that's small in tokens but above the char cap
+        should still succeed with ``truncated=True``."""
+        small = "z" * 4000   # ~1000 tokens
+        runner = as_runner(lambda t: small)
+        with SubagentDispatcher(runner) as d:
+            r = d.run(SubTask(
+                kind="test",
+                prompt="hi",
+                max_output_tokens=5000,
+                truncate_output_chars=500,
+            ))
+        assert r.ok
+        assert r.truncated
+        assert len(r.raw) == 500
+
+    def test_output_under_cap_succeeds(self):
+        runner = as_runner(lambda t: "short reply")
+        with SubagentDispatcher(runner) as d:
+            r = d.run(SubTask(
+                kind="test",
+                prompt="hi",
+                max_output_tokens=100,
+            ))
+        assert r.ok
+        assert r.summary

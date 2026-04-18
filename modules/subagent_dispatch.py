@@ -166,6 +166,9 @@ class SubagentDispatcher:
         log_bare_prompts: bool = False,
     ):
         self._runner = runner
+        # The shared pool is only used by ``run_many`` for the outer fanout
+        # (each inner ``run`` still isolates its worker so a timeout can't
+        # leak into the shared pool).
         self._pool = ThreadPoolExecutor(
             max_workers=default_max_parallel,
             thread_name_prefix="subagent",
@@ -195,7 +198,18 @@ class SubagentDispatcher:
     # -- Public dispatch --------------------------------------------------
 
     def run(self, task: SubTask) -> SubResult:
-        """Run one subagent task synchronously."""
+        """Run one subagent task synchronously.
+
+        Timeout contract: hard deadline for the caller, best-effort
+        cancellation for the worker.  Each ``run`` submits to a dedicated
+        single-slot executor so that a runaway task cannot starve the
+        shared pool used by ``run_many``.  On timeout the future is
+        cancelled and the executor is shut down with ``wait=False``: any
+        thread that is genuinely stuck in pure Python code will continue
+        in the background but cannot contaminate a subsequent ``run``.
+        For true hard-stop semantics (arbitrary code, shell subagents)
+        wrap a subprocess-based runner in ``Runner``.
+        """
         self._stats.dispatched += 1
 
         if self._log_bare_prompts:
@@ -213,11 +227,22 @@ class SubagentDispatcher:
             return result
 
         t0 = time.monotonic()
-        future = self._pool.submit(self._runner, task)
+        # Isolated single-slot executor — runaway tasks can't leak into
+        # the shared pool.
+        isolated = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="subagent-task",
+        )
+        future = isolated.submit(self._runner, task)
         try:
             raw, tin, tout = future.result(timeout=task.timeout_s)
         except FuturesTimeout:
             duration = time.monotonic() - t0
+            # Ask the worker to stop.  If it hasn't started, cancel
+            # succeeds; if it is mid-execution, Python threads can't be
+            # preempted, so the thread keeps running but is quarantined
+            # to this isolated executor which we drop on the floor below.
+            future.cancel()
+            isolated.shutdown(wait=False, cancel_futures=True)
             self._stats.timed_out += 1
             self._stats.failed += 1
             return SubResult(
@@ -228,6 +253,7 @@ class SubagentDispatcher:
             )
         except Exception as exc:                # noqa: BLE001 - intentional
             duration = time.monotonic() - t0
+            isolated.shutdown(wait=False)
             self._stats.failed += 1
             return SubResult(
                 ok=False,
@@ -235,8 +261,31 @@ class SubagentDispatcher:
                 error=f"{type(exc).__name__}: {exc!s}",
                 duration_s=duration,
             )
+        # Happy path: task completed before the deadline — tear the
+        # isolated executor down cleanly.
+        isolated.shutdown(wait=True)
 
         duration = time.monotonic() - t0
+
+        # Output token cap: enforced AFTER the runner returns so callers
+        # can distinguish "transport truncation" (character cap) from
+        # "budget violation" (token cap).  We use the same rough
+        # 4-char-per-token estimator as ``_rough_tokens``.
+        approx_out = _rough_tokens(raw)
+        if approx_out > task.max_output_tokens:
+            self._stats.failed += 1
+            return SubResult(
+                ok=False,
+                summary="",
+                raw=None,
+                cost_tokens_in=tin,
+                cost_tokens_out=tout,
+                duration_s=duration,
+                error=(
+                    f"output tokens ({approx_out}) exceeds cap "
+                    f"({task.max_output_tokens})"
+                ),
+            )
 
         truncated = False
         if len(raw) > task.truncate_output_chars:
