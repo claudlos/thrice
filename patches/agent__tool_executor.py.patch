@@ -1,0 +1,86 @@
+diff --git a/agent/tool_executor.py b/agent/tool_executor.py
+index bbbd239df..5b3649f1c 100644
+--- a/agent/tool_executor.py
++++ b/agent/tool_executor.py
+@@ -58,6 +58,37 @@ def _ra():
+     return run_agent
+ 
+ 
++def _format_tool_exception(tool_name: str, exc: Exception) -> str:
++    """Format tool exceptions with Thrice structured errors when available."""
++    try:
++        from structured_errors import classify_error, format_error_result
++        return format_error_result(classify_error(exc, tool_name=tool_name))
++    except ImportError:
++        return f"Error executing tool '{tool_name}': {exc}"
++    except Exception as fmt_exc:
++        logger.debug("structured_errors formatting failed: %s", fmt_exc)
++        return f"Error executing tool '{tool_name}': {exc}"
++
++
++def _log_tool_selection(agent, tool_name: str, args: dict, result, duration: float, is_error: bool) -> None:
++    """Best-effort tool-call log for the Thrice tool selection model."""
++    try:
++        from hermes_constants import get_hermes_home
++        from tool_selection_model import ToolSelectionLogger
++        db_path = str(get_hermes_home() / "tool_calls.db")
++        ToolSelectionLogger(db_path).log_tool_call(
++            intent=getattr(agent, "_last_user_message", "")[:500],
++            tool_name=tool_name,
++            args=args,
++            success=not is_error,
++            duration=duration,
++        )
++    except ImportError:
++        pass
++    except Exception as exc:
++        logger.debug("Tool selection logging failed: %s", exc)
++
++
+ def _tool_search_scoped_names(agent) -> frozenset:
+     """Return the deferrable tool names the session may invoke via tool_call.
+ 
+@@ -316,7 +347,7 @@ def execute_tool_calls_concurrent(agent, assistant_message, messages: list, effe
+                     pre_tool_block_checked=True,
+                 )
+             except Exception as tool_error:
+-                result = f"Error executing tool '{function_name}': {tool_error}"
++                result = _format_tool_exception(function_name, tool_error)
+                 logger.error("_invoke_tool raised for %s: %s", function_name, tool_error, exc_info=True)
+             duration = time.time() - start
+             is_error, _ = _detect_tool_failure(function_name, result)
+@@ -517,6 +548,8 @@ def execute_tool_calls_concurrent(agent, assistant_message, messages: list, effe
+         # image tool result never poisons canonical session history.
+         # String results pass through unchanged.
+         _tool_content = agent._tool_result_content_for_active_model(name, function_result)
++        _logged_is_error, _ = _detect_tool_failure(name, function_result)
++        _log_tool_selection(agent, name, args, function_result, tool_duration, _logged_is_error)
+         messages.append(make_tool_result_message(name, _tool_content, tc.id))
+ 
+         # ── Per-tool /steer drain ───────────────────────────────────
+@@ -857,7 +890,7 @@ def execute_tool_calls_sequential(agent, assistant_message, messages: list, effe
+                 )
+                 _spinner_result = function_result
+             except Exception as tool_error:
+-                function_result = f"Error executing tool '{function_name}': {tool_error}"
++                function_result = _format_tool_exception(function_name, tool_error)
+                 logger.error("handle_function_call raised for %s: %s", function_name, tool_error, exc_info=True)
+             finally:
+                 tool_duration = time.time() - tool_start_time
+@@ -878,7 +911,7 @@ def execute_tool_calls_sequential(agent, assistant_message, messages: list, effe
+                     disabled_toolsets=getattr(agent, "disabled_toolsets", None),
+                 )
+             except Exception as tool_error:
+-                function_result = f"Error executing tool '{function_name}': {tool_error}"
++                function_result = _format_tool_exception(function_name, tool_error)
+                 logger.error("handle_function_call raised for %s: %s", function_name, tool_error, exc_info=True)
+             tool_duration = time.time() - tool_start_time
+ 
+@@ -964,6 +997,7 @@ def execute_tool_calls_sequential(agent, assistant_message, messages: list, effe
+         # Unwrap _multimodal dicts to an OpenAI-style content list
+         # (see parallel path for rationale). String results pass through.
+         _tool_content = agent._tool_result_content_for_active_model(function_name, function_result)
++        _log_tool_selection(agent, function_name, function_args, function_result, tool_duration, _is_error_result)
+         messages.append(make_tool_result_message(function_name, _tool_content, tool_call.id))
+ 
+         # ── Per-tool /steer drain ───────────────────────────────────

@@ -1,0 +1,38 @@
+diff --git a/agent/agent_runtime_helpers.py b/agent/agent_runtime_helpers.py
+index 73f3cba43..7f79e36c3 100644
+--- a/agent/agent_runtime_helpers.py
++++ b/agent/agent_runtime_helpers.py
+@@ -1725,6 +1725,33 @@ def repair_tool_call(agent, tool_name: str) -> str | None:
+     if not tool_name:
+         return None
+ 
++    try:
++        from tool_alias_map import resolve_alias
++        resolved = resolve_alias(tool_name)
++        if resolved and resolved in agent.valid_tool_names:
++            return resolved
++    except ImportError:
++        pass
++    except Exception as exc:
++        logger.debug("Tool alias resolution failed: %s", exc)
++
++    try:
++        from hermes_constants import get_hermes_home
++        from tool_selection_model import ToolSelectionLogger, ToolSelectionModel, ToolSelector
++        db_path = str(get_hermes_home() / "tool_calls.db")
++        selection_logger = ToolSelectionLogger(db_path)
++        selection_model = ToolSelectionModel(selection_logger)
++        selection_model.train()
++        suggestion = ToolSelector(selection_model).suggest_tool(
++            tool_name, list(agent.valid_tool_names)
++        )
++        if suggestion:
++            return suggestion
++    except ImportError:
++        pass
++    except Exception as exc:
++        logger.debug("Tool selection model failed: %s", exc)
++
+     def _norm(s: str) -> str:
+         return s.lower().replace("-", "_").replace(" ", "_")
+ 

@@ -10,8 +10,8 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/modules-52-blue" alt="52 modules">
-  <img src="https://img.shields.io/badge/tests-1456_passing-green" alt="1456 passing without Hermes; 7 skipped until Hermes is installed">
-  <img src="https://img.shields.io/badge/patches-15-orange" alt="15 patches">
+  <img src="https://img.shields.io/badge/tests-1470_passing-green" alt="1470 passing; 7 skipped">
+  <img src="https://img.shields.io/badge/patches-20-orange" alt="20 patches">
   <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python 3.10+">
   <img src="https://github.com/claudlos/thrice/actions/workflows/tla.yml/badge.svg" alt="TLA+ verified">
 </p>
@@ -123,9 +123,9 @@ preservation in agent loops.
 | `invariants_unified.py` | Unified invariant system with temporal checks |
 | `test_lint_loop.py` | Lower-level test/lint iteration primitives |
 
-### 15 Patches to Hermes Core
+### 20 Patches to Hermes Core
 
-Patches wire the modules into Hermes at key integration points (`run_agent.py`, `cron/jobs.py`, `tools/`, `gateway/`). Every patch follows the same pattern:
+Patches wire the modules into Hermes at key integration points (`agent/`, `cron/`, `tools/`, `gateway/`). Every patch follows the same pattern:
 
 ```python
 try:

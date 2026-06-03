@@ -1,0 +1,24 @@
+diff --git a/agent/conversation_compression.py b/agent/conversation_compression.py
+index 64a5a6278..1be506866 100644
+--- a/agent/conversation_compression.py
++++ b/agent/conversation_compression.py
+@@ -432,6 +432,19 @@ def compress_context(
+         except Exception:
+             pass
+ 
++    try:
++        from context_optimizer import ContextOptimizer
++        target_tokens = approx_tokens or agent.context_compressor.threshold_tokens
++        messages = ContextOptimizer().optimize(
++            messages,
++            target_tokens=target_tokens,
++            model=getattr(agent, "model", None),
++        )
++    except ImportError:
++        pass
++    except Exception as exc:
++        logger.debug("Context optimizer pre-pass failed: %s", exc)
++
+     try:
+         compressed = agent.context_compressor.compress(messages, current_tokens=approx_tokens, focus_topic=focus_topic, force=force)
+     except TypeError:

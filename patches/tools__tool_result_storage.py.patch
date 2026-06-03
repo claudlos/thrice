@@ -1,0 +1,18 @@
+diff --git a/tools/tool_result_storage.py b/tools/tool_result_storage.py
+index fed8621ee..1c7e8a791 100644
+--- a/tools/tool_result_storage.py
++++ b/tools/tool_result_storage.py
+@@ -61,6 +61,13 @@ def generate_preview(content: str, max_chars: int = DEFAULT_PREVIEW_SIZE_CHARS)
+     """Truncate at last newline within max_chars. Returns (preview, has_more)."""
+     if len(content) <= max_chars:
+         return content, False
++    try:
++        from smart_truncation import truncate_output
++        return truncate_output(content, max_chars=max_chars), True
++    except ImportError:
++        pass
++    except Exception as exc:
++        logger.debug("smart_truncation preview failed: %s", exc)
+     truncated = content[:max_chars]
+     last_nl = truncated.rfind("\n")
+     if last_nl > max_chars // 2:

@@ -12,7 +12,7 @@ Supported toolchains (auto-detected from project files; override via
     - Go               : ``go build ./...``
     - TypeScript       : ``tsc --noEmit --pretty false``
     - C / C++          : ``make -k`` (or ``gcc -fdiagnostics-format=json``)
-    - Python (syntax)  : ``python -m compileall -q .``
+    - Python (syntax)  : current interpreter + ``-m compileall -q .``
 
 Usage::
 
@@ -40,6 +40,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -145,7 +146,7 @@ def default_command(toolchain: Toolchain) -> Optional[List[str]]:
         "go":         ["go", "build", "./..."],
         "typescript": ["npx", "--no", "tsc", "--noEmit", "--pretty", "false"],
         "c":          ["make", "-k"],
-        "python":     ["python", "-m", "compileall", "-q", "."],
+        "python":     [sys.executable, "-m", "compileall", "-q", "."],
     }.get(toolchain)
 
 

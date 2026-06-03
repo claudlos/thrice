@@ -1,43 +1,56 @@
 diff --git a/tools/file_tools.py b/tools/file_tools.py
-index 79a111cb..384e5189 100644
+index 45186ae6c..d9e62437d 100644
 --- a/tools/file_tools.py
 +++ b/tools/file_tools.py
-@@ -567,6 +567,17 @@ def write_file_tool(path: str, content: str, task_id: str = "default") -> str:
-         # Refresh the stored timestamp so consecutive writes by this
-         # task don't trigger false staleness warnings.
-         _update_read_timestamp(path, task_id)
-+        # Auto-commit if enabled (gated by HERMES_AUTO_COMMIT env var)
-+        try:
-+            from auto_commit import is_auto_commit_enabled, AutoCommitManager
-+            if is_auto_commit_enabled():
-+                _ac = AutoCommitManager()
-+                _ac.enable(os.path.dirname(os.path.abspath(path)) or ".")
-+                _ac.on_file_edit(path, f"write {os.path.basename(path)}")
-+        except ImportError:
-+            pass
-+        except Exception:
-+            pass
-         return json.dumps(result_dict, ensure_ascii=False)
-     except Exception as e:
-         if _is_expected_write_exception(e):
-@@ -623,6 +634,20 @@ def patch_tool(mode: str = "replace", path: str = None, old_string: str = None,
-         if not result_dict.get("error"):
-             for _p in _paths_to_check:
-                 _update_read_timestamp(_p, task_id)
-+        # Auto-commit patched files if enabled (gated by HERMES_AUTO_COMMIT env var)
-+        if not result_dict.get("error") and _paths_to_check:
-+            try:
-+                from auto_commit import is_auto_commit_enabled, AutoCommitManager
-+                if is_auto_commit_enabled():
-+                    _ac = AutoCommitManager()
-+                    _first = _paths_to_check[0]
-+                    _ac.enable(os.path.dirname(os.path.abspath(_first)) or ".")
-+                    for _p in _paths_to_check:
-+                        _ac.on_file_edit(_p, f"patch {os.path.basename(_p)}")
-+            except ImportError:
-+                pass
-+            except Exception:
-+                pass
-         result_json = json.dumps(result_dict, ensure_ascii=False)
-         # Hint when old_string not found — saves iterations where the agent
-         # retries with stale content instead of re-reading the file.
+@@ -23,6 +23,26 @@ logger = logging.getLogger(__name__)
+ 
+ _EXPECTED_WRITE_ERRNOS = {errno.EACCES, errno.EPERM, errno.EROFS}
+ 
++
++def _thrice_auto_commit(paths: list[str], message_prefix: str) -> None:
++    """Best-effort auto-commit hook gated by HERMES_AUTO_COMMIT."""
++    if not paths:
++        return
++    try:
++        from auto_commit import AutoCommitManager, is_auto_commit_enabled
++        if not is_auto_commit_enabled():
++            return
++        first = os.path.abspath(paths[0])
++        manager = AutoCommitManager()
++        manager.enable(os.path.dirname(first) or ".")
++        for path in paths:
++            abs_path = os.path.abspath(path)
++            manager.on_file_edit(abs_path, f"{message_prefix} {os.path.basename(abs_path)}")
++    except ImportError:
++        pass
++    except Exception as exc:
++        logger.debug("auto_commit hook failed: %s", exc)
++
+ # ---------------------------------------------------------------------------
+ # Read-size guard: cap the character count returned to the model.
+ # We're model-agnostic so we can't count tokens; characters are a safe proxy.
+@@ -1079,6 +1099,8 @@ def write_file_tool(path: str, content: str, task_id: str = "default",
+             if stale_warning:
+                 result_dict["_warning"] = stale_warning
+             _update_read_timestamp(path, task_id)
++            if not result_dict.get("error"):
++                _thrice_auto_commit([path], "write")
+             return json.dumps(result_dict, ensure_ascii=False)
+ 
+         # Serialize the read→modify→write region per-path so concurrent
+@@ -1104,6 +1126,7 @@ def write_file_tool(path: str, content: str, task_id: str = "default",
+             result_dict["resolved_path"] = _resolved
+             if not result_dict.get("error"):
+                 result_dict["files_modified"] = [_resolved]
++                _thrice_auto_commit([_resolved], "write")
+             # Refresh stamps after the successful write so consecutive
+             # writes by this task don't trigger false staleness warnings.
+             _update_read_timestamp(path, task_id)
+@@ -1238,6 +1261,7 @@ def patch_tool(mode: str = "replace", path: str = None, old_string: str = None,
+                 result_dict["files_modified"] = _resolved_modified
+                 if len(_resolved_modified) == 1:
+                     result_dict["resolved_path"] = _resolved_modified[0]
++                _thrice_auto_commit(_resolved_modified, "patch")
+                 for _p in _paths_to_check:
+                     _update_read_timestamp(_p, task_id)
+                     _r = _path_to_resolved.get(_p)

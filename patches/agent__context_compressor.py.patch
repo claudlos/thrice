@@ -1,27 +1,33 @@
 diff --git a/agent/context_compressor.py b/agent/context_compressor.py
-index 6fdb38b2..a8861dfe 100644
+index 079c4b0b5..b600b0253 100644
 --- a/agent/context_compressor.py
 +++ b/agent/context_compressor.py
-@@ -21,6 +21,7 @@ from agent.model_metadata import (
-     get_model_context_length,
-     estimate_messages_tokens_rough,
+@@ -32,6 +32,11 @@ from agent.model_metadata import (
  )
-+from adaptive_compression import get_compression_threshold
+ from agent.redact import redact_sensitive_text
  
++try:
++    from adaptive_compression import get_compression_threshold as _thrice_compression_threshold
++except ImportError:
++    _thrice_compression_threshold = None
++
  logger = logging.getLogger(__name__)
  
-@@ -77,6 +78,14 @@ class ContextCompressor:
-         self.base_url = base_url
-         self.api_key = api_key
-         self.provider = provider
-+        # Use adaptive threshold based on context window size when using
-+        # the default threshold (0.50). Explicit overrides are preserved.
-+        if threshold_percent == 0.50:
-+            threshold_percent = get_compression_threshold(
-+                model_context_size=config_context_length,
-+                model_name=model,
-+                default=threshold_percent,
-+            )
-         self.threshold_percent = threshold_percent
-         self.protect_first_n = protect_first_n
-         self.protect_last_n = protect_last_n
+ SUMMARY_PREFIX = (
+@@ -618,6 +623,16 @@ class ContextCompressor(ContextEngine):
+             config_context_length=config_context_length,
+             provider=provider,
+         )
++        if threshold_percent == 0.50 and _thrice_compression_threshold is not None:
++            try:
++                threshold_percent = _thrice_compression_threshold(
++                    model_context_size=self.context_length,
++                    model_name=model,
++                    default=threshold_percent,
++                )
++                self.threshold_percent = threshold_percent
++            except Exception as exc:
++                logger.debug("Adaptive compression threshold failed: %s", exc)
+         # Floor: never compress below MINIMUM_CONTEXT_LENGTH tokens even if
+         # the percentage would suggest a lower value.  This prevents premature
+         # compression on large-context models at 50% while keeping the % sane

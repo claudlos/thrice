@@ -1,73 +1,39 @@
 diff --git a/tools/process_registry.py b/tools/process_registry.py
-index a3796c8a..ca7525f6 100644
+index d9eb02a4a..95b8b4e92 100644
 --- a/tools/process_registry.py
 +++ b/tools/process_registry.py
-@@ -185,6 +185,11 @@ class ProcessRegistry:
-                     self._running[session.id] = session
- 
-                 self._write_checkpoint()
-+                try:
-+                    from hermes_invariants import InvariantChecker
-+                    InvariantChecker.check_process_registry(self._running, self._finished)
-+                except ImportError:
-+                    pass
-                 return session
- 
-             except ImportError:
-@@ -232,6 +237,11 @@ class ProcessRegistry:
-             self._running[session.id] = session
- 
-         self._write_checkpoint()
-+        try:
-+            from hermes_invariants import InvariantChecker
-+            InvariantChecker.check_process_registry(self._running, self._finished)
-+        except ImportError:
-+            pass
-         return session
- 
-     def spawn_via_env(
-@@ -303,6 +313,11 @@ class ProcessRegistry:
-             self._running[session.id] = session
- 
-         self._write_checkpoint()
-+        try:
-+            from hermes_invariants import InvariantChecker
-+            InvariantChecker.check_process_registry(self._running, self._finished)
-+        except ImportError:
-+            pass
-         return session
- 
-     # ----- Reader / Poller Threads -----
-@@ -414,6 +429,43 @@ class ProcessRegistry:
-             self._running.pop(session.id, None)
+@@ -870,6 +870,7 @@ class ProcessRegistry:
+             was_running = self._running.pop(session.id, None) is not None
              self._finished[session.id] = session
          self._write_checkpoint()
++        self._check_invariants()
+ 
+         # Only enqueue completion notification on the FIRST move.  Without
+         # this guard, kill_process() and the reader thread can both call
+@@ -886,6 +887,38 @@ class ProcessRegistry:
+                 "output": output_tail,
+             })
+ 
++    def _check_invariants(self) -> None:
++        """Best-effort process-registry invariant checks."""
 +        try:
 +            from hermes_invariants import InvariantChecker
 +            InvariantChecker.check_process_registry(self._running, self._finished)
 +        except ImportError:
 +            pass
++        except Exception as exc:
++            logger.debug("Process registry invariant check failed: %s", exc)
 +
 +    def _check_reader_health(self, session: ProcessSession) -> bool:
-+        """Check if a session's reader thread died silently.
-+
-+        If the reader thread is dead but the session hasn't been marked as exited,
-+        the reader crashed on an exception. Mark the session as finished so it
-+        doesn't stay stuck in _running forever.
-+
-+        Returns True if the session was moved to finished (zombie detected).
-+        """
-+        if session.exited or session.detached:
++        """Detect reader threads that died without marking the session exited."""
++        if session is None or session.exited or session.detached:
 +            return False
-+        if session._reader_thread is None:
-+            return False
-+        if session._reader_thread.is_alive():
++        reader = getattr(session, "_reader_thread", None)
++        if reader is None or reader.is_alive():
 +            return False
 +
-+        # Reader thread died but session not marked exited -- zombie detected
 +        logger.warning(
-+            "Reader thread for session %s (pid=%s, cmd=%r) died silently; "
-+            "marking as exited with code -1",
++            "Reader thread for session %s (pid=%s, cmd=%r) died silently; marking exited",
 +            session.id, session.pid, session.command,
 +        )
 +        session.exited = True
@@ -79,26 +45,19 @@ index a3796c8a..ca7525f6 100644
 +            )
 +        self._move_to_finished(session)
 +        return True
- 
++
      # ----- Query Methods -----
  
-@@ -430,6 +482,9 @@ class ProcessRegistry:
-         if session is None:
-             return {"status": "not_found", "error": f"No process with ID {session_id}"}
- 
-+        # Detect zombie sessions where reader thread died silently
-+        self._check_reader_health(session)
-+
-         with session._lock:
-             output_preview = strip_ansi(session.output_buffer[-1000:]) if session.output_buffer else ""
- 
-@@ -512,6 +567,9 @@ class ProcessRegistry:
-         deadline = time.monotonic() + effective_timeout
- 
-         while time.monotonic() < deadline:
-+            # Detect zombie sessions where reader thread died silently
+     def is_completion_consumed(self, session_id: str) -> bool:
+@@ -916,7 +949,10 @@ class ProcessRegistry:
+         """Get a session by ID (running or finished)."""
+         with self._lock:
+             session = self._running.get(session_id) or self._finished.get(session_id)
+-        return self._refresh_detached_session(session)
++        session = self._refresh_detached_session(session)
++        if session is not None:
 +            self._check_reader_health(session)
-+
-             if session.exited:
-                 result = {
-                     "status": "exited",
++        return session
+ 
+     def _reconcile_local_exit(self, session: "ProcessSession") -> None:
+         """Reconcile session.exited against the real child process state.

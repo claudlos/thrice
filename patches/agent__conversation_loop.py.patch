@@ -1,0 +1,223 @@
+diff --git a/agent/conversation_loop.py b/agent/conversation_loop.py
+index 743988b03..fd8c26cab 100644
+--- a/agent/conversation_loop.py
++++ b/agent/conversation_loop.py
+@@ -481,6 +481,20 @@ def run_conversation(
+     # calls so that nudge logic accumulates correctly in CLI mode.
+     agent.iteration_budget = IterationBudget(agent.max_iterations)
+ 
++    if os.environ.get("HERMES_PREDICT_BUDGET", "").lower() == "true":
++        try:
++            from token_budgeting import BudgetAdvisor
++            advice = BudgetAdvisor().suggest_budget(task=user_message, model=agent.model)
++            recommended = getattr(advice, "recommended_iterations", None)
++            if recommended and agent.max_iterations == 90:
++                agent.max_iterations = recommended
++                agent.iteration_budget = IterationBudget(agent.max_iterations)
++                logger.debug("Token budget advisor set max_iterations=%d", agent.max_iterations)
++        except ImportError:
++            pass
++        except Exception as exc:
++            logger.debug("Token budget prediction failed: %s", exc)
++
+     # Log conversation turn start for debugging/observability
+     _preview_text = _summarize_user_message_for_log(user_message)
+     _msg_preview = (_preview_text[:80] + "...") if len(_preview_text) > 80 else _preview_text
+@@ -558,9 +572,22 @@ def run_conversation(
+             _should_review_memory = True
+             agent._turns_since_memory = 0
+ 
++    mention_context = None
++    try:
++        from context_mentions import process_message_mentions
++        _, mention_context = process_message_mentions(user_message)
++    except ImportError:
++        pass
++    except Exception as exc:
++        logger.debug("@-mention resolution failed: %s", exc)
++
+     # Add user message
+-    user_msg = {"role": "user", "content": user_message}
++    if mention_context:
++        user_msg = {"role": "user", "content": f"{user_message}\n\n{mention_context}"}
++    else:
++        user_msg = {"role": "user", "content": user_message}
+     messages.append(user_msg)
++    agent._last_user_message = original_user_message if isinstance(original_user_message, str) else ""
+     current_turn_user_idx = len(messages) - 1
+     agent._persist_user_message_idx = current_turn_user_idx
+     
+@@ -730,6 +757,30 @@ def run_conversation(
+     truncated_tool_call_retries = 0
+     truncated_response_parts: List[str] = []
+     compression_attempts = 0
++    try:
++        from agent_loop_shadow import AgentLoopShadow
++        shadow = AgentLoopShadow(
++            iteration_budget=agent.max_iterations,
++            max_retries=3,
++            enabled=os.getenv("HERMES_SM_SHADOW", "false").lower() in ("1", "true"),
++        )
++        shadow.mirror_flag_change("messages_received", True, messages=messages)
++    except ImportError:
++        shadow = None
++    except Exception as exc:
++        logger.debug("Shadow state machine init failed: %s", exc)
++        shadow = None
++
++    tool_loop_detector = None
++    recent_tools: list[str] = []
++    recent_tool_errors: list[str] = []
++    try:
++        from tool_chain_analysis import LoopDetector
++        tool_loop_detector = LoopDetector()
++    except ImportError:
++        pass
++    except Exception as exc:
++        logger.debug("Tool loop detector init failed: %s", exc)
+     _turn_exit_reason = "unknown"  # Diagnostic: why the loop ended
+ 
+     # Per-turn file-mutation verifier state.  Keyed by resolved path;
+@@ -820,6 +871,18 @@ def run_conversation(
+                 agent._safe_print(f"\n⚠️  Iteration budget exhausted ({agent.iteration_budget.used}/{agent.iteration_budget.max_total} iterations used)")
+             break
+ 
++        if tool_loop_detector and recent_tools:
++            try:
++                if tool_loop_detector.is_stuck(recent_tools, recent_tool_errors):
++                    escape_hint = tool_loop_detector.suggest_escape(recent_tools)
++                    messages.append({
++                        "role": "user",
++                        "content": f"[SYSTEM NOTICE - loop detected] {escape_hint}",
++                    })
++                    logger.info("Tool chain loop detected; injected escape suggestion")
++            except Exception as exc:
++                logger.debug("Loop detection check failed: %s", exc)
++
+         # Fire step_callback for gateway hooks (agent:step event)
+         if agent.step_callback is not None:
+             try:
+@@ -1000,6 +1063,14 @@ def run_conversation(
+         effective_system = active_system_prompt or ""
+         if agent.ephemeral_system_prompt:
+             effective_system = (effective_system + "\n\n" + agent.ephemeral_system_prompt).strip()
++        try:
++            from debugging_guidance import get_debugging_prompt, should_inject_debugging_guidance
++            if should_inject_debugging_guidance(messages):
++                effective_system = (effective_system + "\n\n" + get_debugging_prompt(messages)).strip()
++        except ImportError:
++            pass
++        except Exception as exc:
++            logger.debug("Debugging guidance injection failed: %s", exc)
+         if effective_system:
+             api_messages = [{"role": "system", "content": effective_system}] + api_messages
+ 
+@@ -1023,6 +1094,20 @@ def run_conversation(
+                 native_anthropic=agent._use_native_cache_layout,
+             )
+ 
++        try:
++            from verified_messages import AutoFixer, MessageValidator
++            validation = MessageValidator().validate(api_messages)
++            if not validation.valid:
++                logger.info(
++                    "Verified messages: %d error(s) detected, applying auto-fix",
++                    len(validation.errors),
++                )
++                api_messages = AutoFixer().fix(api_messages)
++        except ImportError:
++            pass
++        except Exception as exc:
++            logger.debug("Verified messages validation failed: %s", exc)
++
+         # Safety net: strip orphaned tool results / add stubs for missing
+         # results before sending to the API.  Runs unconditionally — not
+         # gated on context_compressor — so orphans from session loading or
+@@ -1214,6 +1299,8 @@ def run_conversation(
+                 # isn't sent with stale, primary-shaped reasoning fields.
+                 agent._reapply_reasoning_echo_for_provider(api_messages)
+                 api_kwargs = agent._build_api_kwargs(api_messages)
++                if shadow:
++                    shadow.mirror_flag_change("api_call_started", True, api_params={"messages": api_messages})
+                 if agent._force_ascii_payload:
+                     _sanitize_structure_non_ascii(api_kwargs)
+                 if agent.api_mode == "codex_responses":
+@@ -1985,6 +2072,16 @@ def run_conversation(
+                         clear_nous_rate_limit()
+                     except Exception:
+                         pass
++                if shadow:
++                    try:
++                        shadow.mirror_flag_change(
++                            "response_received",
++                            True,
++                            response={},
++                            finish_reason=finish_reason,
++                        )
++                    except Exception as exc:
++                        logger.debug("Shadow response event failed: %s", exc)
+                 agent._touch_activity(f"API call #{api_call_count} completed")
+                 break  # Success, exit retry loop
+ 
+@@ -3883,6 +3980,24 @@ def run_conversation(
+ 
+                 agent._execute_tool_calls(assistant_message, messages, effective_task_id, api_call_count)
+ 
++                if tool_loop_detector is not None:
++                    try:
++                        for tool_call in assistant_message.tool_calls:
++                            tool_name = getattr(getattr(tool_call, "function", None), "name", "")
++                            tool_id = getattr(tool_call, "id", "")
++                            if tool_name:
++                                recent_tools.append(tool_name)
++                            for msg in reversed(messages):
++                                if msg.get("role") == "tool" and msg.get("tool_call_id") == tool_id:
++                                    content = msg.get("content", "")
++                                    text = content if isinstance(content, str) else str(content)
++                                    recent_tool_errors.append(
++                                        text if ("error" in text.lower() or "traceback" in text.lower()) else ""
++                                    )
++                                    break
++                    except Exception as exc:
++                        logger.debug("Tool loop tracking failed: %s", exc)
++
+                 if agent._tool_guardrail_halt_decision is not None:
+                     decision = agent._tool_guardrail_halt_decision
+                     _turn_exit_reason = "guardrail_halt"
+@@ -4444,6 +4559,20 @@ def run_conversation(
+                     exc_info=True,
+                 )
+ 
++    if shadow:
++        try:
++            shadow.mirror_flag_change("return_result", True)
++            shadow_summary = shadow.summary()
++            if (
++                shadow_summary.get("divergences", 0) > 0
++                or shadow_summary.get("invariant_violations", 0) > 0
++            ):
++                logger.warning("Shadow SM session summary: %s", shadow_summary)
++            else:
++                logger.debug("Shadow SM session summary: %s", shadow_summary)
++        except Exception:
++            pass
++
+     # Determine if conversation completed successfully
+     completed = (
+         final_response is not None
+@@ -4744,6 +4873,15 @@ def run_conversation(
+     except Exception as exc:
+         logger.warning("on_session_end hook failed: %s", exc)
+ 
++    if os.environ.get("HERMES_SELF_TEST", "").lower() == "true":
++        try:
++            from self_improving_tests import on_session_complete
++            on_session_complete(messages)
++        except ImportError:
++            pass
++        except Exception as exc:
++            logger.debug("Self-improving test hook failed: %s", exc)
++
+     return result
+ 
+ 

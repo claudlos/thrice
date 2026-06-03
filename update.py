@@ -115,10 +115,17 @@ def update(hermes_dir: Path, dry_run: bool = False, modules_only: bool = False):
                 print(f"  OK   {target_rel}")
                 ok += 1
             else:
-                # Already applied?
-                print(f"  WARN {target_rel} (may already be applied or needs manual merge)")
-                fail += 1
-                failed_files.append(target_rel)
+                rev = subprocess.run(
+                    ["git", "apply", "--check", "--reverse", str(patch_file)],
+                    capture_output=True, text=True, cwd=hermes_dir
+                )
+                if rev.returncode == 0:
+                    print(f"  SKIP {target_rel} (already applied)")
+                    ok += 1
+                else:
+                    print(f"  WARN {target_rel} (may already be applied or needs manual merge)")
+                    fail += 1
+                    failed_files.append(target_rel)
         else:
             # Try normal apply
             result = subprocess.run(
@@ -129,6 +136,16 @@ def update(hermes_dir: Path, dry_run: bool = False, modules_only: bool = False):
                 print(f"  OK   {target_rel}")
                 ok += 1
             else:
+                # Already applied? Treat as success so update.py is idempotent.
+                rev = subprocess.run(
+                    ["git", "apply", "--check", "--reverse", str(patch_file)],
+                    capture_output=True, text=True, cwd=hermes_dir
+                )
+                if rev.returncode == 0:
+                    print(f"  SKIP {target_rel} (already applied)")
+                    ok += 1
+                    continue
+
                 # Try 3-way merge
                 result = subprocess.run(
                     ["git", "apply", "--3way", str(patch_file)],

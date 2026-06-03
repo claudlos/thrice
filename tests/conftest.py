@@ -18,11 +18,12 @@ import pytest
 # Path setup: make thrice/ importable from tests/
 # ---------------------------------------------------------------------------
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_MODULES_ROOT = os.path.join(_PROJECT_ROOT, "modules")
 _THRICE_ROOT = os.path.join(_PROJECT_ROOT, "thrice")
 _NEW_FILES = os.path.join(_PROJECT_ROOT, "new-files")
 
-for p in (_PROJECT_ROOT, _THRICE_ROOT, _NEW_FILES):
-    if p not in sys.path:
+for p in (_PROJECT_ROOT, _MODULES_ROOT, _THRICE_ROOT, _NEW_FILES):
+    if os.path.isdir(p) and p not in sys.path:
         sys.path.insert(0, p)
 
 # ---------------------------------------------------------------------------

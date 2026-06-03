@@ -21,13 +21,17 @@ MANIFEST_NAME = ".hermes-improvements-manifest.json"
 # Map of patch files to their target paths in hermes-agent
 PATCH_MAP = {
     "agent__context_compressor.py.patch": "agent/context_compressor.py",
+    "agent__agent_runtime_helpers.py.patch": "agent/agent_runtime_helpers.py",
+    "agent__conversation_compression.py.patch": "agent/conversation_compression.py",
+    "agent__conversation_loop.py.patch": "agent/conversation_loop.py",
     "agent__prompt_builder.py.patch": "agent/prompt_builder.py",
+    "agent__system_prompt.py.patch": "agent/system_prompt.py",
+    "agent__tool_executor.py.patch": "agent/tool_executor.py",
     "cron____init__.py.patch": "cron/__init__.py",
     "cron__jobs.py.patch": "cron/jobs.py",
     "cron__scheduler.py.patch": "cron/scheduler.py",
     "gateway__session.py.patch": "gateway/session.py",
     "gateway__stream_consumer.py.patch": "gateway/stream_consumer.py",
-    "run_agent.py.patch": "run_agent.py",
     "tests__tools__test_delegate.py.patch": "tests/tools/test_delegate.py",
     "tools__cronjob_tools.py.patch": "tools/cronjob_tools.py",
     "tools__delegate_tool.py.patch": "tools/delegate_tool.py",
@@ -35,6 +39,7 @@ PATCH_MAP = {
     "tools__fuzzy_match.py.patch": "tools/fuzzy_match.py",
     "tools__process_registry.py.patch": "tools/process_registry.py",
     "tools__skills_tool.py.patch": "tools/skills_tool.py",
+    "tools__tool_result_storage.py.patch": "tools/tool_result_storage.py",
 }
 
 # Standalone modules to copy (relative to modules/)
@@ -178,6 +183,15 @@ def apply_patch(hermes_dir: Path, patch_file: Path, target_rel: str, dry_run: bo
     )
     if result.returncode == 0:
         print(f"  OK   {target_rel}")
+        return True
+
+    # Already applied? Treat as success so install/update are idempotent.
+    rev = subprocess.run(
+        ["git", "apply", "--check", "--reverse", str(patch_file)],
+        capture_output=True, text=True, cwd=hermes_dir
+    )
+    if rev.returncode == 0:
+        print(f"  SKIP {target_rel} (already applied)")
         return True
 
     # Try with --3way for fuzzy matching
