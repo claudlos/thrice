@@ -300,6 +300,16 @@ class TestRepoMap(unittest.TestCase):
         names = {s.name for s in rm.symbols.values()}
         self.assertIn("brand_new_func", names)
 
+    def test_refresh_accepts_relative_paths(self):
+        rm = RepoMap(self.tmpdir).scan()
+        self._write("utils.py", "def replacement():\n    pass\n")
+
+        rm.refresh(changed_files=["utils.py"])
+
+        names = {s.name for s in rm.symbols.values()}
+        self.assertIn("replacement", names)
+        self.assertNotIn("format_date", names)
+
     def test_refresh_detects_mtime(self):
         rm = RepoMap(self.tmpdir).scan()
 
@@ -345,6 +355,17 @@ class TestRepoMapCache(unittest.TestCase):
         map1 = cache.get_map(self.tmpdir)
         map2 = cache.get_map(self.tmpdir, force_refresh=True)
         self.assertEqual(map1, map2)
+
+    def test_cache_respects_max_tokens(self):
+        for i in range(30):
+            with open(os.path.join(self.tmpdir, f"mod_{i}.py"), "w") as f:
+                f.write("\n".join(f"def fn_{i}_{j}():\n    pass" for j in range(5)))
+        cache = RepoMapCache(ttl_seconds=60)
+
+        large = cache.get_map(self.tmpdir, max_tokens=2000)
+        small = cache.get_map(self.tmpdir, max_tokens=10)
+
+        self.assertLess(len(small), len(large))
 
     def test_thread_safety(self):
         cache = RepoMapCache(ttl_seconds=60)

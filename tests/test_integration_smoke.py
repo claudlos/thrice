@@ -9,12 +9,47 @@ import pytest
 
 pytestmark = pytest.mark.requires_hermes
 
-# Ensure hermes-agent is on the path
-sys.path.insert(0, os.path.expanduser("~/.hermes/hermes-agent"))
+_HERMES_AGENT = os.path.expanduser("~/.hermes/hermes-agent")
+
+
+def _push_hermes_path():
+    if _HERMES_AGENT in sys.path:
+        sys.path.remove(_HERMES_AGENT)
+    sys.path.insert(0, _HERMES_AGENT)
+
+
+def _pop_hermes_path():
+    while _HERMES_AGENT in sys.path:
+        sys.path.remove(_HERMES_AGENT)
+
+
+def _purge_hermes_modules():
+    hermes_root = os.path.realpath(_HERMES_AGENT)
+    for name, module in list(sys.modules.items()):
+        module_file = getattr(module, "__file__", None)
+        if not module_file:
+            continue
+        try:
+            rel = os.path.realpath(module_file)
+        except OSError:
+            continue
+        if rel == hermes_root or rel.startswith(hermes_root + os.sep):
+            sys.modules.pop(name, None)
+
+
+@pytest.fixture(autouse=True)
+def hermes_agent_path():
+    _push_hermes_path()
+    try:
+        yield
+    finally:
+        _pop_hermes_path()
+        _purge_hermes_modules()
 
 # Some of these tests (TestCronStateMachine) require a hermes-agent with
 # the SM-1 patches already applied.  Skip the whole module if we can't
 # even import the exports they depend on.
+_push_hermes_path()
 try:
     from cron.jobs import is_valid_transition  # noqa: F401
 except Exception as _exc:
@@ -23,6 +58,9 @@ except Exception as _exc:
         "run install.py then retry",
         allow_module_level=True,
     )
+finally:
+    _pop_hermes_path()
+    _purge_hermes_modules()
 
 
 class TestToolAliasMap:

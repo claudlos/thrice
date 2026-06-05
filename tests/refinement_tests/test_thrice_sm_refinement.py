@@ -34,6 +34,7 @@ from agent_loop_state_machine import (  # noqa: E402
     AgentLoopStateMachine,
 )
 from cron_state_machine import CRON_STATES, CronJobStateMachine  # noqa: E402
+from state_machine import GuardFailed  # noqa: E402
 
 pytestmark = pytest.mark.refinement
 
@@ -239,6 +240,30 @@ class TestAgentLoopRefinement:
         sm.retry_api()
         assert sm.state == AgentLoopState.CALLING_API
         assert sm.loop_context.retry_count == 1
+
+    def test_build_request_requires_api_params(self):
+        sm = AgentLoopStateMachine(iteration_budget=5, max_retries=2)
+        sm.receive_message([{"role": "user", "content": "hi"}])
+
+        with pytest.raises(GuardFailed):
+            sm.build_request(None)
+
+        assert sm.state == AgentLoopState.PREPARING_API_CALL
+
+    def test_tool_complete_forces_followup_generation(self):
+        sm = AgentLoopStateMachine(iteration_budget=5, max_retries=2)
+        sm.receive_message([{"role": "user", "content": "hi"}])
+        sm.build_request({"model": "x", "messages": []})
+        sm.receive_response({"content": None}, finish_reason="tool_calls", tool_calls=[{"id": "1"}])
+        sm.dispatch_tools()
+        sm.tool_complete([{"role": "tool", "tool_call_id": "1", "content": "ok"}])
+
+        assert sm.loop_context.needs_continue
+        assert sm.decide_after_continuation() == "continue_generation"
+        sm.continue_generation()
+        assert sm.state == AgentLoopState.PREPARING_API_CALL
+        assert sm.loop_context.api_params is None
+        assert not sm.loop_context.force_continuation
 
     def test_budget_exhausted_is_terminal(self):
         """LV-A3: exhausting the iteration budget lands in a terminal state."""

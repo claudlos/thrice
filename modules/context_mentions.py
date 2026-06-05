@@ -167,15 +167,19 @@ class MentionResolver:
 
     def _run_git(self, args: List[str], cwd: str) -> str:
         """Run a git command and return output."""
-        result = subprocess.run(
-            ["git"] + args,
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
+        try:
+            result = subprocess.run(
+                ["git"] + args,
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+            return f"[git {' '.join(args)} failed: {exc}]"
         if result.returncode != 0:
-            return None
+            detail = (result.stderr or result.stdout or "").strip()
+            return f"[git {' '.join(args)} failed: {detail}]"
         return result.stdout.strip()
 
     def _resolve_diff(self, mention: Mention, cwd: str) -> str:

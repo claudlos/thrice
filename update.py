@@ -21,10 +21,38 @@ import subprocess
 import sys
 from pathlib import Path
 
-from install import PATCH_MAP, STANDALONE_MODULES
+from install import (
+    OPTIONAL_PATCHES,
+    PATCH_MAP,
+    STANDALONE_MODULES,
+    apply_patch,
+    module_backup_name,
+    patch_backup_name,
+)
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
 MANIFEST_NAME = ".hermes-improvements-manifest.json"
+
+
+def _load_manifest(hermes_dir: Path) -> dict:
+    manifest_path = hermes_dir / MANIFEST_NAME
+    if not manifest_path.exists():
+        return {}
+    try:
+        with open(manifest_path) as fp:
+            return json.load(fp)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _patch_already_applied(hermes_dir: Path, patch_file: Path) -> bool:
+    result = subprocess.run(
+        ["git", "apply", "--check", "--reverse", str(patch_file)],
+        capture_output=True,
+        text=True,
+        cwd=hermes_dir,
+    )
+    return result.returncode == 0
 
 
 def find_hermes_agent() -> Path:
@@ -49,6 +77,11 @@ def find_hermes_agent() -> Path:
 def update(hermes_dir: Path, dry_run: bool = False, modules_only: bool = False):
     modules_dir = SCRIPT_DIR / "modules"
     patches_dir = SCRIPT_DIR / "patches"
+    existing_manifest = _load_manifest(hermes_dir)
+    installed_modules = set(existing_manifest.get("modules", []))
+    module_backups = dict(existing_manifest.get("module_backups", {}))
+    copied_modules = []
+    missing_modules = 0
 
     # Phase 1: Re-copy standalone modules (always safe)
     print("\n=== Phase 1: Re-copying standalone modules ===\n")
@@ -57,6 +90,7 @@ def update(hermes_dir: Path, dry_run: bool = False, modules_only: bool = False):
         mod_path = modules_dir / mod_rel_str
         if not mod_path.exists():
             print(f"  SKIP {mod_rel_str} (not found in modules/)")
+            missing_modules += 1
             continue
         rel = Path(mod_rel_str)
         dst = hermes_dir / rel
@@ -65,17 +99,38 @@ def update(hermes_dir: Path, dry_run: bool = False, modules_only: bool = False):
             print(f"  OK   {rel} ({status})")
         else:
             dst.parent.mkdir(parents=True, exist_ok=True)
+            if dst.exists() and mod_rel_str not in installed_modules and mod_rel_str not in module_backups:
+                backup_rel = module_backup_name(mod_rel_str)
+                backup_dir = hermes_dir / ".hermes-improvements-backup"
+                backup_dir.mkdir(exist_ok=True)
+                shutil.copy2(dst, backup_dir / backup_rel)
+                module_backups[mod_rel_str] = backup_rel
             shutil.copy2(mod_path, dst)
             print(f"  OK   {rel}")
         copied += 1
+        copied_modules.append(mod_rel_str)
     print(f"\n  {copied} modules copied")
 
     if modules_only:
         print("\n=== Phase 2: SKIPPED (--modules-only) ===")
+        if not dry_run:
+            from datetime import datetime
+            backup_dir = hermes_dir / ".hermes-improvements-backup"
+            manifest = {
+                "installed_at": datetime.now().isoformat(),
+                "hermes_dir": str(hermes_dir),
+                "modules": copied_modules,
+                "module_backups": module_backups,
+                "patches": existing_manifest.get("patches", []),
+                "backups_dir": str(backup_dir) if backup_dir.exists() else existing_manifest.get("backups_dir"),
+                "failed_patches": existing_manifest.get("failed_patches", []),
+            }
+            with open(hermes_dir / MANIFEST_NAME, "w") as fp:
+                json.dump(manifest, fp, indent=2)
         print("\nDone. Standalone modules updated.")
         print("Patched files were NOT re-applied — they may need manual attention")
         print("if Hermes updated those files.")
-        return
+        return missing_modules == 0
 
     # Phase 2: Re-apply patches
     print("\n=== Phase 2: Re-applying patches ===\n")
@@ -88,6 +143,7 @@ def update(hermes_dir: Path, dry_run: bool = False, modules_only: bool = False):
     ok = 0
     fail = 0
     failed_files = []
+    applied_patches = []
 
     for patch_file in sorted(patches_dir.glob("*.patch")):
         # Look up target path from PATCH_MAP instead of deriving it
@@ -99,12 +155,10 @@ def update(hermes_dir: Path, dry_run: bool = False, modules_only: bool = False):
 
         if not target.exists():
             print(f"  SKIP {target_rel} (not found)")
+            if patch_file.name not in OPTIONAL_PATCHES:
+                fail += 1
+                failed_files.append(target_rel)
             continue
-
-        # Backup
-        if not dry_run:
-            backup_name = target_rel.replace("/", "__")
-            shutil.copy2(target, backup_dir / backup_name)
 
         if dry_run:
             result = subprocess.run(
@@ -122,42 +176,29 @@ def update(hermes_dir: Path, dry_run: bool = False, modules_only: bool = False):
                 if rev.returncode == 0:
                     print(f"  SKIP {target_rel} (already applied)")
                     ok += 1
+                    applied_patches.append(target_rel)
                 else:
                     print(f"  WARN {target_rel} (may already be applied or needs manual merge)")
                     fail += 1
                     failed_files.append(target_rel)
         else:
-            # Try normal apply
-            result = subprocess.run(
-                ["git", "apply", str(patch_file)],
-                capture_output=True, text=True, cwd=hermes_dir
-            )
-            if result.returncode == 0:
-                print(f"  OK   {target_rel}")
+            if _patch_already_applied(hermes_dir, patch_file):
+                print(f"  SKIP {target_rel} (already applied)")
                 ok += 1
-            else:
-                # Already applied? Treat as success so update.py is idempotent.
-                rev = subprocess.run(
-                    ["git", "apply", "--check", "--reverse", str(patch_file)],
-                    capture_output=True, text=True, cwd=hermes_dir
-                )
-                if rev.returncode == 0:
-                    print(f"  SKIP {target_rel} (already applied)")
-                    ok += 1
-                    continue
+                applied_patches.append(target_rel)
+                continue
 
-                # Try 3-way merge
-                result = subprocess.run(
-                    ["git", "apply", "--3way", str(patch_file)],
-                    capture_output=True, text=True, cwd=hermes_dir
-                )
-                if result.returncode == 0:
-                    print(f"  OK   {target_rel} (3-way merge)")
-                    ok += 1
-                else:
-                    print(f"  FAIL {target_rel}")
-                    fail += 1
-                    failed_files.append(target_rel)
+            backup_name = patch_backup_name(target_rel)
+            backup = backup_dir / backup_name
+            shutil.copy2(target, backup)
+            if apply_patch(hermes_dir, patch_file, target_rel, dry_run=False):
+                ok += 1
+                applied_patches.append(target_rel)
+            else:
+                shutil.copy2(backup, target)
+                print(f"  ROLLBACK {target_rel}")
+                fail += 1
+                failed_files.append(target_rel)
 
     print(f"\n  {ok} patches applied, {fail} failed")
 
@@ -177,8 +218,9 @@ def update(hermes_dir: Path, dry_run: bool = False, modules_only: bool = False):
         manifest = {
             "installed_at": datetime.now().isoformat(),
             "hermes_dir": str(hermes_dir),
-            "modules": [str(p.relative_to(modules_dir)) for p in modules_dir.rglob("*.py")],
-            "patches": [f for f in [pf.stem.replace("__", "/") for pf in patches_dir.glob("*.patch")] if f not in failed_files],
+            "modules": copied_modules,
+            "module_backups": module_backups,
+            "patches": applied_patches,
             "backups_dir": str(backup_dir),
             "failed_patches": failed_files,
         }
@@ -191,6 +233,7 @@ def update(hermes_dir: Path, dry_run: bool = False, modules_only: bool = False):
         print("DRY RUN — no changes made")
     else:
         print("UPDATE COMPLETE")
+    return missing_modules == 0 and fail == 0
 
 
 def main():
@@ -210,7 +253,9 @@ def main():
     if args.dry_run:
         print("Mode: DRY RUN")
 
-    update(hermes_dir, dry_run=args.dry_run, modules_only=args.modules_only)
+    ok = update(hermes_dir, dry_run=args.dry_run, modules_only=args.modules_only)
+    if not ok:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
