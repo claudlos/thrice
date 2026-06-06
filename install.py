@@ -224,15 +224,20 @@ def copy_module(
         print(f"  OK   {module_rel} ({exists})")
         return True, None
 
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    backup_rel = None
-    # Backup existing file before overwriting
-    if dst.exists() and backup_dir is not None:
-        backup_rel = module_backup_name(module_rel)
-        backup_path = backup_dir / backup_rel
-        backup_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(dst, backup_path)
-    shutil.copy2(src, dst)
+    try:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        backup_rel = None
+        # Backup existing file before overwriting
+        if dst.exists() and backup_dir is not None:
+            backup_rel = module_backup_name(module_rel)
+            backup_path = backup_dir / backup_rel
+            backup_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(dst, backup_path)
+        shutil.copy2(src, dst)
+    except OSError as exc:
+        print(f"  FAIL {module_rel} — {exc}")
+        return False, None
+
     print(f"  OK   {module_rel}")
     return True, backup_rel
 
@@ -289,6 +294,8 @@ def install(hermes_dir: Path, dry_run: bool = False, skip_patches: bool = False)
             manifest["modules"].append(mod_rel)
             if backup_rel:
                 manifest["module_backups"][mod_rel] = backup_rel
+        else:
+            modules_fail += 1
 
     print(f"\n  {modules_ok}/{len(STANDALONE_MODULES)} modules installed")
 
@@ -341,7 +348,7 @@ def install(hermes_dir: Path, dry_run: bool = False, skip_patches: bool = False)
 
         print(f"\n  {patches_ok}/{len(PATCH_MAP)} patches applied, {patches_fail} failed")
         if patches_fail:
-            print("  Patch failures are fatal; no manifest will be saved for patch changes.")
+            print("  Patch failures are fatal; partial install details are recorded for diagnostics.")
     else:
         patches_fail = 0
         print("\n=== Phase 2: SKIPPED (--skip-patches) ===")

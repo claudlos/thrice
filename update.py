@@ -78,7 +78,6 @@ def update(hermes_dir: Path, dry_run: bool = False, modules_only: bool = False):
     modules_dir = SCRIPT_DIR / "modules"
     patches_dir = SCRIPT_DIR / "patches"
     existing_manifest = _load_manifest(hermes_dir)
-    installed_modules = set(existing_manifest.get("modules", []))
     module_backups = dict(existing_manifest.get("module_backups", {}))
     copied_modules = []
     missing_modules = 0
@@ -99,7 +98,7 @@ def update(hermes_dir: Path, dry_run: bool = False, modules_only: bool = False):
             print(f"  OK   {rel} ({status})")
         else:
             dst.parent.mkdir(parents=True, exist_ok=True)
-            if dst.exists() and mod_rel_str not in installed_modules and mod_rel_str not in module_backups:
+            if dst.exists() and mod_rel_str not in module_backups:
                 backup_rel = module_backup_name(mod_rel_str)
                 backup_dir = hermes_dir / ".hermes-improvements-backup"
                 backup_dir.mkdir(exist_ok=True)

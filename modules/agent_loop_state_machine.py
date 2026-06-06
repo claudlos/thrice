@@ -748,6 +748,7 @@ class AgentLoopStateMachine:
         """
         result = self._sm.apply(Action.CONTINUE_GENERATION, self._ctx())
         self._loop_ctx.api_params = None
+        self._loop_ctx.force_continuation = False
         return result
 
     def continue_generation(self) -> TransitionRecord:

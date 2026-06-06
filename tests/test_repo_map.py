@@ -310,6 +310,21 @@ class TestRepoMap(unittest.TestCase):
         self.assertIn("replacement", names)
         self.assertNotIn("format_date", names)
 
+    def test_refresh_ignores_paths_outside_root(self):
+        rm = RepoMap(self.tmpdir).scan()
+        outside = os.path.join(
+            os.path.dirname(self.tmpdir),
+            f"outside_{os.path.basename(self.tmpdir)}.py",
+        )
+        with open(outside, "w") as f:
+            f.write("def outside_symbol():\n    pass\n")
+        self.addCleanup(lambda: os.path.exists(outside) and os.unlink(outside))
+
+        rm.refresh(changed_files=[outside, "../outside.py"])
+
+        names = {s.name for s in rm.symbols.values()}
+        self.assertNotIn("outside_symbol", names)
+
     def test_refresh_detects_mtime(self):
         rm = RepoMap(self.tmpdir).scan()
 
@@ -366,6 +381,9 @@ class TestRepoMapCache(unittest.TestCase):
         small = cache.get_map(self.tmpdir, max_tokens=10)
 
         self.assertLess(len(small), len(large))
+        rendered = cache._cache[os.path.abspath(self.tmpdir)][2]
+        self.assertIn(2000, rendered)
+        self.assertIn(10, rendered)
 
     def test_thread_safety(self):
         cache = RepoMapCache(ttl_seconds=60)

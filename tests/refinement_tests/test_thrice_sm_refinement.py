@@ -265,6 +265,31 @@ class TestAgentLoopRefinement:
         assert sm.loop_context.api_params is None
         assert not sm.loop_context.force_continuation
 
+    def test_compression_continuation_consumes_force_flag(self):
+        sm = AgentLoopStateMachine(
+            iteration_budget=5,
+            max_retries=2,
+            compression_threshold=10,
+        )
+        sm.receive_message([{"role": "user", "content": "hi"}])
+        sm.build_request({"model": "x", "messages": []})
+        sm.receive_response(
+            {"content": None},
+            finish_reason="tool_calls",
+            tool_calls=[{"id": "1"}],
+            token_count=20,
+        )
+        sm.dispatch_tools()
+        sm.tool_complete([{"role": "tool", "tool_call_id": "1", "content": "ok"}])
+
+        assert sm.decide_after_continuation() == "compress"
+        sm.compress([{"role": "user", "content": "summary"}], new_token_count=1)
+        sm.continue_after_compression()
+
+        assert sm.state == AgentLoopState.PREPARING_API_CALL
+        assert sm.loop_context.api_params is None
+        assert not sm.loop_context.force_continuation
+
     def test_budget_exhausted_is_terminal(self):
         """LV-A3: exhausting the iteration budget lands in a terminal state."""
         sm = AgentLoopStateMachine(iteration_budget=1, max_retries=2)

@@ -50,6 +50,52 @@ def test_uninstall_restores_overwritten_modules(tmp_path):
     assert not (hermes / "auto_commit.py").exists()
 
 
+def test_copy_module_reports_copy_errors(tmp_path, monkeypatch):
+    src = tmp_path / "source.py"
+    dst = tmp_path / "nested" / "target.py"
+    src.write_text("VALUE = 1\n", encoding="utf-8")
+
+    def fail_copy(*_args, **_kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(install.shutil, "copy2", fail_copy)
+
+    copied, backup_rel = install.copy_module(
+        src,
+        dst,
+        "target.py",
+        dry_run=False,
+        backup_dir=tmp_path / "backup",
+    )
+
+    assert copied is False
+    assert backup_rel is None
+    assert not dst.exists()
+
+
+def test_update_recreates_missing_module_backup(tmp_path, monkeypatch):
+    hermes = _fake_hermes(tmp_path)
+    original = "ORIGINAL_VALUE = 1\n"
+    target = hermes / "adaptive_compression.py"
+    target.write_text(original, encoding="utf-8")
+    manifest = {
+        "modules": ["adaptive_compression.py"],
+        "module_backups": {},
+        "patches": [],
+        "backups_dir": str(hermes / ".hermes-improvements-backup"),
+        "failed_patches": [],
+    }
+    (hermes / update.MANIFEST_NAME).write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setattr(update, "PATCH_MAP", {})
+
+    assert update.update(hermes, dry_run=False, modules_only=False) is True
+
+    updated = json.loads((hermes / update.MANIFEST_NAME).read_text(encoding="utf-8"))
+    backup_rel = updated["module_backups"]["adaptive_compression.py"]
+    backup = hermes / ".hermes-improvements-backup" / backup_rel
+    assert backup.read_text(encoding="utf-8") == original
+
+
 def test_update_manifest_records_only_copied_modules(tmp_path, monkeypatch):
     hermes = _fake_hermes(tmp_path)
     monkeypatch.setattr(update, "PATCH_MAP", {})

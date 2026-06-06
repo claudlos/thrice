@@ -527,6 +527,18 @@ class TestBatchingAdvisor:
         batches = self.advisor.suggest_batch(calls)
         assert len(batches) == 2
 
+    def test_duplicate_call_ids_do_not_drop_calls(self):
+        calls = [
+            {"tool_name": "read_file", "args": {"path": "/a.py"}, "call_id": "dup"},
+            {"tool_name": "read_file", "args": {"path": "/b.py"}, "call_id": "dup"},
+        ]
+
+        records = self.advisor._dicts_to_records(calls)
+        batches = self.advisor.suggest_batch(calls)
+
+        assert len({r.call_id for r in records}) == 2
+        assert sum(len(batch) for batch in batches) == 2
+
     def test_estimate_speedup_single_batch(self):
         plan = [[
             {"tool_name": "read_file"},

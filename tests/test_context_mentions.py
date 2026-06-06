@@ -218,6 +218,8 @@ class TestResolveAll:
 
         result = self.resolver.resolve_all("Read @file:hello.txt", self.tmpdir)
         assert len(result.contexts) == 1
+        assert result.contexts[0].content == "content here"
+        assert result.contexts[0].mention.kind == "file"
 
     def test_resolve_all_log_outside_git_repo(self):
         result = self.resolver.resolve_all("Show @log", self.tmpdir)

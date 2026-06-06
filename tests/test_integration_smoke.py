@@ -52,7 +52,7 @@ def hermes_agent_path():
 _push_hermes_path()
 try:
     from cron.jobs import is_valid_transition  # noqa: F401
-except Exception as _exc:
+except ImportError as _exc:
     pytest.skip(
         f"hermes-agent cron.jobs missing SM-1 exports ({_exc!s}); "
         "run install.py then retry",

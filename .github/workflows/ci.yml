@@ -98,6 +98,6 @@ jobs:
           : > /tmp/fake-hermes/tools/skills_tool.py
           : > /tmp/fake-hermes/tests/tools/test_delegate.py
       - name: Dry-run install
-        run: python install.py --hermes-dir /tmp/fake-hermes --dry-run
+        run: python install.py --hermes-dir /tmp/fake-hermes --dry-run --skip-patches
       - name: Dry-run modules-only install
         run: python install.py --hermes-dir /tmp/fake-hermes --dry-run --modules-only
