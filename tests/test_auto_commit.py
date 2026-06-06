@@ -270,6 +270,19 @@ class TestSecretScanIntegration:
         )
         assert "settings.py" not in result.stdout
 
+    def test_high_entropy_secret_blocks_commit(self, git_repo):
+        mgr = AutoCommitManager(scan_for_secrets=True, conventional_messages=False)
+        assert mgr.enable(git_repo)
+        secret_path = os.path.join(git_repo, "tokens.py")
+        suspicious = "k9J2pQ7vR4mN8xLtV1yB" + "3zUoH6cDwGsAfEiXjK5R"
+        with open(secret_path, "w") as f:
+            f.write(f"TOKEN = '{suspicious}'\n")
+
+        record = mgr.on_file_edit(secret_path, description="add token")
+
+        assert record is None
+        assert any(f.rule == "high_entropy_string" for f in mgr.last_blocked_findings)
+
     def test_clean_file_commits(self, git_repo):
         mgr = AutoCommitManager(scan_for_secrets=True, conventional_messages=False)
         assert mgr.enable(git_repo)

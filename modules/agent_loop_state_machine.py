@@ -257,6 +257,15 @@ def _guard_api_params_valid(
     return ctx.get("api_params") is not None
 
 
+def _guard_has_budget_and_api_params(
+    current_state: str, action: str, ctx: Dict[str, Any]
+) -> bool:
+    """Budget remains and API params have been built."""
+    return _guard_has_budget(current_state, action, ctx) and _guard_api_params_valid(
+        current_state, action, ctx
+    )
+
+
 def _guard_has_tools(
     current_state: str, action: str, ctx: Dict[str, Any]
 ) -> bool:
@@ -437,8 +446,8 @@ class AgentLoopStateMachine:
                 TransitionDef(
                     S.PREPARING_API_CALL.value,
                     S.CALLING_API.value,
-                    guard=_guard_has_budget,
-                    guard_name="has_budget",
+                    guard=_guard_has_budget_and_api_params,
+                    guard_name="has_budget_and_api_params",
                 ),
                 # Also from COMPRESSING_CONTEXT (after compression)
                 TransitionDef(
@@ -712,6 +721,7 @@ class AgentLoopStateMachine:
         """
         self._loop_ctx.tool_results = results
         self._loop_ctx.pending_tool_calls = []
+        self._loop_ctx.force_continuation = True
         # Append tool result messages
         for result in results:
             self._loop_ctx.messages.append(result)
@@ -736,7 +746,10 @@ class AgentLoopStateMachine:
 
         COMPRESSING_CONTEXT -> PREPARING_API_CALL
         """
-        return self._sm.apply(Action.CONTINUE_GENERATION, self._ctx())
+        result = self._sm.apply(Action.CONTINUE_GENERATION, self._ctx())
+        self._loop_ctx.api_params = None
+        self._loop_ctx.force_continuation = False
+        return result
 
     def continue_generation(self) -> TransitionRecord:
         """Continue generation (finish_reason=length or force).
@@ -744,7 +757,10 @@ class AgentLoopStateMachine:
         HANDLING_CONTINUATION -> PREPARING_API_CALL
         Guard: needs_continue
         """
-        return self._sm.apply(Action.CONTINUE_GENERATION, self._ctx())
+        result = self._sm.apply(Action.CONTINUE_GENERATION, self._ctx())
+        self._loop_ctx.api_params = None
+        self._loop_ctx.force_continuation = False
+        return result
 
     def return_result(self) -> TransitionRecord:
         """Return the final response.

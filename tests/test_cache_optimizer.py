@@ -108,6 +108,13 @@ class TestPrefixGuardTools:
         # Set-based diagnostic must NOT fire — nothing was added or removed.
         assert not any(b.kind == "tools_changed" for b in v.breakages)
 
+    def test_schema_change_same_name_is_flagged(self):
+        g = PrefixGuard()
+        g.check(tools=[{"name": "edit", "description": "old"}])
+        v = g.check(tools=[{"name": "edit", "description": "new"}])
+        assert not v.ok
+        assert any(b.kind == "tools_schema_changed" for b in v.breakages)
+
     def test_add_plus_reorder_reports_set_change_not_reorder(self):
         """When both churn kinds co-occur, the set change is the more
         actionable diagnostic; report it alone."""

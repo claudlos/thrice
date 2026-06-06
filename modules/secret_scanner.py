@@ -188,7 +188,7 @@ def _entropy_findings(text: str, file: Optional[str]) -> List[Finding]:
         line = text.count("\n", 0, m.start()) + 1
         out.append(Finding(
             rule="high_entropy_string",
-            severity="low",
+            severity="medium",
             file=file,
             line=line,
             match=_mask(value),

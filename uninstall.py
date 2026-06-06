@@ -43,23 +43,39 @@ def uninstall(hermes_dir: Path, dry_run: bool = False):
         manifest = json.load(f)
 
     backup_dir = Path(manifest["backups_dir"]) if manifest.get("backups_dir") else None
+    module_backups = manifest.get("module_backups", {})
 
-    # Phase 1: Remove standalone modules
+    # Phase 1: Remove or restore standalone modules
     print("\n=== Phase 1: Removing standalone modules ===\n")
     removed = 0
+    restored_modules = 0
     for mod_rel in manifest.get("modules", []):
         target = hermes_dir / mod_rel
+        backup_rel = module_backups.get(mod_rel)
+        backup = backup_dir / backup_rel if backup_dir and backup_rel else None
         if target.exists():
-            if dry_run:
-                print(f"  DEL  {mod_rel}")
+            if backup_rel and not (backup and backup.exists()):
+                print(f"  SKIP {mod_rel} (module backup missing)")
+                if not dry_run:
+                    print("    Leaving existing file in place.")
+            elif backup and backup.exists():
+                if dry_run:
+                    print(f"  RESTORE {mod_rel}")
+                else:
+                    shutil.copy2(backup, target)
+                    print(f"  RESTORE {mod_rel}")
+                restored_modules += 1
             else:
-                target.unlink()
-                print(f"  DEL  {mod_rel}")
-            removed += 1
+                if dry_run:
+                    print(f"  DEL  {mod_rel}")
+                else:
+                    target.unlink()
+                    print(f"  DEL  {mod_rel}")
+                removed += 1
         else:
             print(f"  SKIP {mod_rel} (already gone)")
 
-    print(f"\n  {removed} modules removed")
+    print(f"\n  {removed} modules removed, {restored_modules} modules restored")
 
     # Phase 2: Restore patched files from backups
     print("\n=== Phase 2: Restoring patched files ===\n")

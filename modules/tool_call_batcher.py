@@ -179,6 +179,11 @@ class DependencyAnalyzer:
         for call in calls:
             graph.add_node(call)
 
+        for call in calls:
+            for dep_id in call.depends_on:
+                if dep_id in graph.nodes and dep_id != call.call_id:
+                    graph.add_edge(dep_id, call.call_id)
+
         # Pairwise analysis: for each later call, check earlier calls
         for i, later in enumerate(calls):
             for j in range(i):
@@ -202,6 +207,11 @@ class DependencyAnalyzer:
         """
         cat_a = _categorize(call_a.tool_name)
         cat_b = _categorize(call_b.tool_name)
+
+        # Unknown tools may have side effects.  Only tools with known
+        # categories are eligible for optimistic parallelization.
+        if ToolCategory.OTHER in (cat_a, cat_b):
+            return False
 
         # Rule 1 & 2: pure reads / searches are independent of each other
         if cat_a in (ToolCategory.READ, ToolCategory.SEARCH) and \
@@ -620,12 +630,20 @@ class BatchingAdvisor:
     def _dicts_to_records(calls: List[Dict]) -> List[ToolCallRecord]:
         """Convert raw dicts to ToolCallRecord instances."""
         records = []
+        used_ids: Set[str] = set()
         for i, c in enumerate(calls):
+            call_id = str(c.get("call_id") or "")
+            if not call_id or call_id in used_ids:
+                call_id = uuid.uuid4().hex[:12]
+                while call_id in used_ids:
+                    call_id = uuid.uuid4().hex[:12]
+            used_ids.add(call_id)
             records.append(ToolCallRecord(
                 tool_name=c.get("tool_name", "unknown"),
                 args=c.get("args", {}),
                 timestamp=c.get("timestamp", time.time() + i * 0.001),
                 result=c.get("result"),
                 depends_on=c.get("depends_on", []),
+                call_id=call_id,
             ))
         return records

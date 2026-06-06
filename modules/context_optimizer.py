@@ -101,6 +101,20 @@ def _get_content_str(msg: Dict[str, Any]) -> str:
     return str(content)
 
 
+def _assistant_tool_call_ids(msg: Dict[str, Any]) -> set[str]:
+    """Extract OpenAI/Anthropic-style tool-use IDs from an assistant message."""
+    ids: set[str] = set()
+    for tc in msg.get("tool_calls") or []:
+        if isinstance(tc, dict) and tc.get("id"):
+            ids.add(str(tc["id"]))
+    content = msg.get("content", "")
+    if isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "tool_use" and block.get("id"):
+                ids.add(str(block["id"]))
+    return ids
+
+
 _ERROR_PATTERNS = re.compile(
     r"(error|exception|traceback|failed|failure|errno|panic|fatal)",
     re.IGNORECASE,
@@ -328,9 +342,11 @@ class ContextOptimizer:
             protected.add(i)
 
         # Protect last user message
+        last_user_idx = None
         for i in range(n - 1, -1, -1):
             if _get_role(messages[i]) == "user":
                 protected.add(i)
+                last_user_idx = i
                 break
 
         # Protect system messages (they use the system budget)
@@ -338,14 +354,38 @@ class ContextOptimizer:
             if _get_role(m) == "system":
                 protected.add(i)
 
-        # Build tool pairing map: tool result -> preceding tool_use
-        tool_pairs: Dict[int, int] = {}
+        hard_protected = {
+            i for i, m in enumerate(messages)
+            if _get_role(m) == "system"
+        }
+        if last_user_idx is not None:
+            hard_protected.add(last_user_idx)
+
+        # Build atomic assistant/tool-result groups.  A single assistant message
+        # can emit multiple tool calls; all matching tool results must stay with
+        # that assistant or be removed together.
+        tool_groups: List[set[int]] = []
+        group_by_idx: Dict[int, set[int]] = {}
         for i, m in enumerate(messages):
-            if _get_role(m) == "tool" and i > 0:
-                tool_pairs[i] = i - 1
-                # If tool result is protected, protect the tool_use too
-                if i in protected:
-                    protected.add(i - 1)
+            if _get_role(m) != "assistant":
+                continue
+            tool_ids = _assistant_tool_call_ids(m)
+            if "tool_calls" not in m and not tool_ids:
+                continue
+            group = {i}
+            j = i + 1
+            while j < n and _get_role(messages[j]) == "tool":
+                tc_id = messages[j].get("tool_call_id")
+                if tool_ids and tc_id is not None and str(tc_id) not in tool_ids:
+                    break
+                group.add(j)
+                j += 1
+            if len(group) > 1:
+                tool_groups.append(group)
+                for idx in group:
+                    group_by_idx[idx] = group
+                if group & protected:
+                    protected.update(group)
 
         # Score all messages
         scores = self.scorer.score_all(messages)
@@ -362,29 +402,40 @@ class ContextOptimizer:
         for _score, idx in candidates:
             if current_tokens <= budget.optimized_history + budget.recent_context + budget.system_prompt:
                 break
-            # Don't orphan tool results
-            if idx in tool_pairs.values():
-                # This is a tool_use; check if its tool result is still present
-                result_idx = [k for k, v in tool_pairs.items() if v == idx]
-                if result_idx and result_idx[0] not in removed:
-                    # Remove both tool_use and result together
-                    current_tokens -= message_tokens(messages[idx])
-                    current_tokens -= message_tokens(messages[result_idx[0]])
-                    removed.add(idx)
-                    removed.add(result_idx[0])
+            group = group_by_idx.get(idx)
+            if group:
+                if group & protected:
                     continue
-            if idx in tool_pairs:
-                # This is a tool result; remove with its tool_use
-                pair_idx = tool_pairs[idx]
-                if pair_idx not in protected:
-                    current_tokens -= message_tokens(messages[idx])
-                    current_tokens -= message_tokens(messages[pair_idx])
-                    removed.add(idx)
-                    removed.add(pair_idx)
-                    continue
+                for group_idx in group:
+                    if group_idx not in removed:
+                        current_tokens -= message_tokens(messages[group_idx])
+                        removed.add(group_idx)
+                continue
 
             current_tokens -= message_tokens(messages[idx])
             removed.add(idx)
+
+        if current_tokens > target_tokens:
+            fallback_candidates = [
+                (scores[i], i)
+                for i in range(n)
+                if i in protected and i not in hard_protected and i not in removed
+            ]
+            fallback_candidates.sort(key=lambda x: x[0])
+            for _score, idx in fallback_candidates:
+                if current_tokens <= target_tokens:
+                    break
+                group = group_by_idx.get(idx)
+                if group:
+                    if group & hard_protected:
+                        continue
+                    for group_idx in group:
+                        if group_idx not in removed:
+                            current_tokens -= message_tokens(messages[group_idx])
+                            removed.add(group_idx)
+                    continue
+                current_tokens -= message_tokens(messages[idx])
+                removed.add(idx)
 
         return [m for i, m in enumerate(messages) if i not in removed]
 

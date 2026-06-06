@@ -57,6 +57,7 @@ Typical wiring::
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import re
 import statistics
@@ -135,6 +136,7 @@ class PrefixGuard:
         # separate lets us emit precise diagnostics.
         self._last_tools_set_hash: Optional[str] = None
         self._last_tools_order_hash: Optional[str] = None
+        self._last_tools_schema_hash: Optional[str] = None
         self._last_tool_names: Tuple[str, ...] = ()
         self._last_system_hash: Optional[str] = None
 
@@ -198,6 +200,7 @@ class PrefixGuard:
         # reorders are easy to fix, adds/removes often aren't.
         set_hash   = _hash("\x00".join(sorted(names)))
         order_hash = _hash("\x00".join(names))
+        schema_hash = _hash(json.dumps(tools, sort_keys=True, default=str, separators=(",", ":")))
         out: List[PrefixBreakage] = []
         if self._last_tools_set_hash is not None:
             prev_set = set(self._last_tool_names)
@@ -225,8 +228,15 @@ class PrefixGuard:
                     ),
                     location="tools",
                 ))
+            elif schema_hash != self._last_tools_schema_hash:
+                out.append(PrefixBreakage(
+                    kind="tools_schema_changed",
+                    detail="tool definitions changed without a name/order change",
+                    location="tools",
+                ))
         self._last_tools_set_hash   = set_hash
         self._last_tools_order_hash = order_hash
+        self._last_tools_schema_hash = schema_hash
         self._last_tool_names       = names
         return out
 

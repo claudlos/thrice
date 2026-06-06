@@ -398,6 +398,18 @@ class RepoMap:
                 old = self.files.get(fpath)
                 if old is None or old.mtime < mtime:
                     changed_files.append(fpath)
+        else:
+            normalized = []
+            for f in changed_files:
+                fpath = f if os.path.isabs(f) else os.path.join(self.root_dir, f)
+                fpath = os.path.abspath(fpath)
+                try:
+                    if os.path.commonpath([self.root_dir, fpath]) != self.root_dir:
+                        continue
+                except ValueError:
+                    continue
+                normalized.append(fpath)
+            changed_files = normalized
 
         if not changed_files:
             return self
@@ -597,8 +609,8 @@ class RepoMapCache:
 
     def __init__(self, ttl_seconds: float = 60.0):
         self._lock = threading.Lock()
-        self._cache: Dict[str, Tuple[RepoMap, float, str]] = {}
-        # key: root_dir -> (repo_map, cached_at, cached_map_text)
+        self._cache: Dict[str, Tuple[RepoMap, float, Dict[int, str]]] = {}
+        # key: root_dir -> (repo_map, cached_at, rendered_text_by_token_budget)
         self.ttl = ttl_seconds
 
     def get_map(self, root_dir: str, max_tokens: int = 2000,
@@ -607,21 +619,35 @@ class RepoMapCache:
         root_dir = os.path.abspath(root_dir)
 
         with self._lock:
+            rendered: Dict[int, str] = {}
             if not force_refresh and root_dir in self._cache:
-                repo_map, cached_at, cached_text = self._cache[root_dir]
-                if time.time() - cached_at < self.ttl:
-                    return cached_text
+                repo_map, cached_at, rendered = self._cache[root_dir]
+                fresh = time.time() - cached_at < self.ttl and not self._has_changes(repo_map)
+                if fresh:
+                    if max_tokens not in rendered:
+                        rendered = dict(rendered)
+                        rendered[max_tokens] = repo_map.generate_map(max_tokens=max_tokens)
+                        self._cache[root_dir] = (repo_map, time.time(), rendered)
+                    return rendered[max_tokens]
 
             # Need to rebuild
             if root_dir in self._cache:
-                repo_map = self._cache[root_dir][0]
-                repo_map.refresh()
+                repo_map, _cached_at, rendered = self._cache[root_dir]
+                if force_refresh:
+                    repo_map = RepoMap(root_dir).scan()
+                else:
+                    repo_map.refresh()
             else:
                 repo_map = RepoMap(root_dir).scan()
 
-            text = repo_map.generate_map(max_tokens=max_tokens)
-            self._cache[root_dir] = (repo_map, time.time(), text)
-            return text
+            budgets = set(rendered)
+            budgets.add(max_tokens)
+            rendered = {
+                budget: repo_map.generate_map(max_tokens=budget)
+                for budget in budgets
+            }
+            self._cache[root_dir] = (repo_map, time.time(), rendered)
+            return rendered[max_tokens]
 
     def invalidate(self, root_dir: Optional[str] = None):
         """Invalidate cache for a directory (or all)."""
@@ -637,14 +663,35 @@ class RepoMapCache:
         root_dir = os.path.abspath(root_dir)
         with self._lock:
             if root_dir in self._cache:
-                repo_map = self._cache[root_dir][0]
+                repo_map, _cached_at, rendered = self._cache[root_dir]
             else:
                 repo_map = RepoMap(root_dir).scan()
+                rendered = {}
 
             repo_map.refresh(changed_files=changed_files)
-            text = repo_map.generate_map(max_tokens=max_tokens)
-            self._cache[root_dir] = (repo_map, time.time(), text)
-            return text
+            budgets = set(rendered)
+            budgets.add(max_tokens)
+            rendered = {
+                budget: repo_map.generate_map(max_tokens=budget)
+                for budget in budgets
+            }
+            self._cache[root_dir] = (repo_map, time.time(), rendered)
+            return rendered[max_tokens]
+
+    @staticmethod
+    def _has_changes(repo_map: RepoMap) -> bool:
+        current_files: Set[str] = set()
+        for fpath in repo_map._iter_files():
+            current_files.add(fpath)
+            old = repo_map.files.get(fpath)
+            if old is None:
+                return True
+            try:
+                if os.stat(fpath).st_mtime > old.mtime:
+                    return True
+            except OSError:
+                return True
+        return set(repo_map.files) != current_files
 
 
 # ---------------------------------------------------------------------------

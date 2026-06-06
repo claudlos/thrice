@@ -226,6 +226,11 @@ class TestDependencyAnalyzer:
         b = _rec("terminal", args={"command": "pwd"})
         assert self.analyzer.are_independent(a, b) is False
 
+    def test_unknown_tools_are_conservatively_dependent(self):
+        a = _rec("custom_delete", args={})
+        b = _rec("custom_notify", args={})
+        assert self.analyzer.are_independent(a, b) is False
+
     def test_write_and_terminal_dependent(self):
         a = _rec("write_file", args={"path": "/x.py"})
         b = _rec("terminal", args={"command": "python /x.py"})
@@ -241,6 +246,20 @@ class TestDependencyAnalyzer:
         assert len(graph) == 3
         # w1 depends on r1 (same file), but not on r2
         assert "r1" in graph.get_dependencies("w1")
+
+    def test_explicit_depends_on_edges_are_honored(self):
+        calls = [
+            ToolCallRecord("read_file", {"path": "/a.py"}, call_id="a", timestamp=1.0),
+            ToolCallRecord(
+                "read_file",
+                {"path": "/b.py"},
+                call_id="b",
+                depends_on=["a"],
+                timestamp=2.0,
+            ),
+        ]
+        groups = self.analyzer.find_parallelizable_groups(calls)
+        assert [[r.call_id for r in group] for group in groups] == [["a"], ["b"]]
 
     def test_find_parallelizable_groups(self):
         calls = [
@@ -507,6 +526,18 @@ class TestBatchingAdvisor:
         ]
         batches = self.advisor.suggest_batch(calls)
         assert len(batches) == 2
+
+    def test_duplicate_call_ids_do_not_drop_calls(self):
+        calls = [
+            {"tool_name": "read_file", "args": {"path": "/a.py"}, "call_id": "dup"},
+            {"tool_name": "read_file", "args": {"path": "/b.py"}, "call_id": "dup"},
+        ]
+
+        records = self.advisor._dicts_to_records(calls)
+        batches = self.advisor.suggest_batch(calls)
+
+        assert len({r.call_id for r in records}) == 2
+        assert sum(len(batch) for batch in batches) == 2
 
     def test_estimate_speedup_single_batch(self):
         plan = [[

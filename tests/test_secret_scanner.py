@@ -107,6 +107,7 @@ class TestEntropy:
         suspicious = "k9J2pQ7vR4mN8xLtV1yB" + "3zUoH6cDwGsAfEiXjK5R"
         findings = scan_text(f"token = '{suspicious}'")
         assert any(f.rule == "high_entropy_string" for f in findings)
+        assert any(f.rule == "high_entropy_string" and f.severity == "medium" for f in findings)
 
     def test_short_string_not_flagged(self):
         findings = scan_text("short_token = 'abc123'")

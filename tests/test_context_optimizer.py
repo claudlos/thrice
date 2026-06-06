@@ -179,6 +179,27 @@ class TestContextOptimizer:
                 # There should be an assistant message before it
                 assert i > 0
 
+    def test_multi_tool_results_stay_with_calling_assistant(self):
+        msgs = [
+            make_msg("system", "s"),
+            make_msg("user", "Run both tools"),
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{"id": "a"}, {"id": "b"}],
+            },
+            make_msg("tool", "A" * 4000, tool_call_id="a"),
+            make_msg("tool", "small", tool_call_id="b"),
+            make_msg("assistant", "done"),
+            make_msg("user", "next"),
+        ]
+
+        result = self.optimizer.optimize(msgs, 1000)
+        result_roles = [(m.get("role"), m.get("tool_call_id"), bool(m.get("tool_calls"))) for m in result]
+
+        assert ("tool", "b", False) not in result_roles
+        assert all(m.get("role") != "tool" for m in result)
+
     def test_empty_messages(self):
         result = self.optimizer.optimize([], 1000)
         assert result == []

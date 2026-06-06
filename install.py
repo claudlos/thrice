@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Hermes Improvements Installer
-Installs 38 standalone modules and patches 15 existing files.
+Installs standalone modules and patches existing Hermes files.
 All changes are reversible via uninstall.py.
 """
 import argparse
@@ -40,6 +40,12 @@ PATCH_MAP = {
     "tools__process_registry.py.patch": "tools/process_registry.py",
     "tools__skills_tool.py.patch": "tools/skills_tool.py",
     "tools__tool_result_storage.py.patch": "tools/tool_result_storage.py",
+}
+
+# Test-only patches should not make a runtime install fail when a packaged
+# Hermes checkout does not include its upstream test tree.
+OPTIONAL_PATCHES = {
+    "tests__tools__test_delegate.py.patch",
 }
 
 # Standalone modules to copy (relative to modules/)
@@ -137,16 +143,14 @@ def find_hermes_agent() -> Path:
     return None
 
 
-def backup_file(target: Path, backup_dir: Path) -> Path:
-    """Backup a file before modifying it."""
-    if not target.exists():
-        return None
-    rel = target.name
-    backup = backup_dir / rel
-    # Handle nested paths
-    backup.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(target, backup)
-    return backup
+def patch_backup_name(target_rel: str) -> str:
+    """Return the backup filename for a patched Hermes file."""
+    return target_rel.replace("/", "__")
+
+
+def module_backup_name(module_rel: str) -> str:
+    """Return the backup filename for an overwritten standalone module."""
+    return "module__" + module_rel.replace("/", "__")
 
 
 def apply_patch(hermes_dir: Path, patch_file: Path, target_rel: str, dry_run: bool = False) -> bool:
@@ -203,35 +207,39 @@ def apply_patch(hermes_dir: Path, patch_file: Path, target_rel: str, dry_run: bo
         print(f"  OK   {target_rel} (3-way merge)")
         return True
 
-    # Try with increased fuzz
-    result = subprocess.run(
-        ["git", "apply", "--reject", str(patch_file)],
-        capture_output=True, text=True, cwd=hermes_dir
-    )
-    if result.returncode == 0:
-        print(f"  WARN {target_rel} (applied with rejects — check .rej files)")
-        return True
-
     print(f"  FAIL {target_rel} — {result.stderr.strip()}")
     return False
 
 
-def copy_module(src: Path, dst: Path, dry_run: bool = False, backup_dir: Path = None) -> bool:
+def copy_module(
+    src: Path,
+    dst: Path,
+    module_rel: str,
+    dry_run: bool = False,
+    backup_dir: Path = None,
+) -> tuple[bool, str | None]:
     """Copy a standalone module, backing up existing file first."""
     if dry_run:
         exists = "overwrite" if dst.exists() else "new"
-        print(f"  OK   {dst.name} ({exists})")
-        return True
+        print(f"  OK   {module_rel} ({exists})")
+        return True, None
 
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    # Backup existing file before overwriting
-    if dst.exists() and backup_dir is not None:
-        backup_path = backup_dir / f"module__{dst.name}"
-        backup_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(dst, backup_path)
-    shutil.copy2(src, dst)
-    print(f"  OK   {dst.name}")
-    return True
+    try:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        backup_rel = None
+        # Backup existing file before overwriting
+        if dst.exists() and backup_dir is not None:
+            backup_rel = module_backup_name(module_rel)
+            backup_path = backup_dir / backup_rel
+            backup_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(dst, backup_path)
+        shutil.copy2(src, dst)
+    except OSError as exc:
+        print(f"  FAIL {module_rel} — {exc}")
+        return False, None
+
+    print(f"  OK   {module_rel}")
+    return True, backup_rel
 
 
 def syntax_check(hermes_dir: Path, files: list) -> int:
@@ -257,8 +265,10 @@ def install(hermes_dir: Path, dry_run: bool = False, skip_patches: bool = False)
         "installed_at": datetime.now().isoformat(),
         "hermes_dir": str(hermes_dir),
         "modules": [],
+        "module_backups": {},
         "patches": [],
         "backups_dir": None,
+        "failed_patches": [],
     }
 
     # Create backup directory
@@ -270,15 +280,22 @@ def install(hermes_dir: Path, dry_run: bool = False, skip_patches: bool = False)
     # Phase 1: Copy standalone modules
     print("\n=== Phase 1: Installing standalone modules ===\n")
     modules_ok = 0
+    modules_fail = 0
     for mod_rel in STANDALONE_MODULES:
         src = MODULES_DIR / mod_rel
         dst = hermes_dir / mod_rel
         if not src.exists():
             print(f"  MISS {mod_rel} (not in installer)")
+            modules_fail += 1
             continue
-        if copy_module(src, dst, dry_run, backup_dir=backup_dir):
+        copied, backup_rel = copy_module(src, dst, mod_rel, dry_run, backup_dir=backup_dir)
+        if copied:
             modules_ok += 1
             manifest["modules"].append(mod_rel)
+            if backup_rel:
+                manifest["module_backups"][mod_rel] = backup_rel
+        else:
+            modules_fail += 1
 
     print(f"\n  {modules_ok}/{len(STANDALONE_MODULES)} modules installed")
 
@@ -294,13 +311,16 @@ def install(hermes_dir: Path, dry_run: bool = False, skip_patches: bool = False)
                 print(f"  MISS {patch_name}")
                 continue
 
-            # Backup before patching
-            if not dry_run:
-                target = hermes_dir / target_rel
-                if target.exists():
-                    backup_rel = target_rel.replace("/", "__")
-                    backup = backup_dir / backup_rel
-                    shutil.copy2(target, backup)
+            optional = patch_name in OPTIONAL_PATCHES
+            target = hermes_dir / target_rel
+            if optional and not target.exists():
+                print(f"  SKIP {target_rel} (optional file not found)")
+                continue
+
+            backup = None
+            if not dry_run and target.exists():
+                backup = backup_dir / patch_backup_name(target_rel)
+                shutil.copy2(target, backup)
 
             if apply_patch(hermes_dir, patch_file, target_rel, dry_run):
                 patches_ok += 1
@@ -308,11 +328,15 @@ def install(hermes_dir: Path, dry_run: bool = False, skip_patches: bool = False)
                 patched_files.append(target_rel)
             else:
                 patches_fail += 1
+                manifest["failed_patches"].append(target_rel)
+                if not dry_run and backup and backup.exists():
+                    shutil.copy2(backup, target)
+                    print(f"  ROLLBACK {target_rel}")
                 # Rollback: restore all already-patched files from backups
                 if not dry_run and patched_files:
                     print(f"\n  Rolling back {len(patched_files)} already-patched files...")
                     for prev_rel in patched_files:
-                        prev_backup_rel = prev_rel.replace("/", "__")
+                        prev_backup_rel = patch_backup_name(prev_rel)
                         prev_backup = backup_dir / prev_backup_rel
                         prev_target = hermes_dir / prev_rel
                         if prev_backup.exists():
@@ -323,7 +347,10 @@ def install(hermes_dir: Path, dry_run: bool = False, skip_patches: bool = False)
                 break  # Stop applying further patches
 
         print(f"\n  {patches_ok}/{len(PATCH_MAP)} patches applied, {patches_fail} failed")
+        if patches_fail:
+            print("  Patch failures are fatal; partial install details are recorded for diagnostics.")
     else:
+        patches_fail = 0
         print("\n=== Phase 2: SKIPPED (--skip-patches) ===")
 
     # Phase 3: Syntax validation
@@ -331,6 +358,7 @@ def install(hermes_dir: Path, dry_run: bool = False, skip_patches: bool = False)
     all_files = manifest["modules"] + manifest["patches"]
     if dry_run:
         print("  (skipped in dry-run mode)")
+        errors = 0
     else:
         errors = syntax_check(hermes_dir, all_files)
         if errors == 0:
@@ -363,6 +391,7 @@ def install(hermes_dir: Path, dry_run: bool = False, skip_patches: bool = False)
     print()
     print("To uninstall: python3 uninstall.py")
     print("To re-apply after Hermes update: python3 update.py")
+    return modules_fail == 0 and patches_fail == 0 and errors == 0
 
 
 def main():
@@ -401,7 +430,9 @@ def main():
             if response.lower() != "y":
                 sys.exit(0)
 
-    install(hermes_dir, dry_run=args.dry_run, skip_patches=skip_patches)
+    ok = install(hermes_dir, dry_run=args.dry_run, skip_patches=skip_patches)
+    if not ok:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
